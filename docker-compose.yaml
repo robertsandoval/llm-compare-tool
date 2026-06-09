@@ -1,0 +1,97 @@
+version: "3.9"
+
+# LLM Comparison Tool — Local Development
+# Prerequisites: Docker + Docker Compose, .env file (copy from .env.example)
+
+services:
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Collector ─────────────────────────────────────────────────────────────────
+  collector:
+    build: ./collector
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - RECORD_TTL_SECONDS=${RECORD_TTL_SECONDS:-86400}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Model Router ──────────────────────────────────────────────────────────────
+  model-router:
+    build: ./model-router
+    ports:
+      - "8000:8000"
+    environment:
+      - COLLECTOR_URL=http://collector:8001
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY:-}
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - PRIMARY_MODEL=${PRIMARY_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+    volumes:
+      - ./model-router/config.yaml:/app/config.yaml:ro
+    depends_on:
+      collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── llama-stack (Primary LLM gateway) ─────────────────────────────────────────
+  # Uses Ollama as the default backend for local dev. Switch to vllm for GPU.
+  llama-stack:
+    image: llamastack/distribution-ollama:latest
+    ports:
+      - "8321:8321"
+    environment:
+      - LLAMA_STACK_PORT=8321
+      - INFERENCE_MODEL=${PRIMARY_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+    volumes:
+      - llama-stack-data:/root/.llama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8321/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Envoy Proxy ────────────────────────────────────────────────────────────────
+  envoy:
+    build: ./envoy
+    ports:
+      - "8080:8080"   # API gateway
+      - "9901:9901"   # Envoy admin
+    depends_on:
+      llama-stack:
+        condition: service_healthy
+      model-router:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9901/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  llama-stack-data:

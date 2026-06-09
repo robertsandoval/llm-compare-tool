@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llama-stack-run-config
+  namespace: llm-comparison
+data:
+  run.yaml: |
+    version: '2'
+    image_name: llm-comparison-primary
+
+    providers:
+      inference:
+      - provider_id: primary-inference
+        provider_type: remote::ollama
+        config:
+          url: http://ollama:11434
+
+      # Switch to vLLM for GPU-accelerated nodes:
+      # - provider_id: primary-inference
+      #   provider_type: remote::vllm
+      #   config:
+      #     url: http://vllm:8000
+
+      memory:
+      - provider_id: faiss
+        provider_type: inline::faiss
+        config:
+          kvstore:
+            type: sqlite
+            namespace: null
+            db_path: /root/.llama/faiss_store.db
+
+    metadata_store:
+      namespace: null
+      type: sqlite
+      db_path: /root/.llama/registry.db
+
+    models:
+    - metadata: {}
+      model_id: meta-llama/Llama-3.1-8B-Instruct
+      provider_id: primary-inference
+      provider_model_id: null
+      model_type: llm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-stack
+  namespace: llm-comparison
+  labels:
+    app: llama-stack
+spec:
+  selector:
+    app: llama-stack
+  ports:
+  - name: http
+    port: 8321
+    targetPort: 8321
+    protocol: TCP
+  type: ClusterIP

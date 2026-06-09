@@ -1,0 +1,19 @@
+{{- if and .Values.llamaStack.enabled .Values.llamaStack.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "llm-comparison.llamaStackName" . }}-data
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: primary-llm
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.llamaStack.persistence.size }}
+  {{- if .Values.llamaStack.persistence.storageClassName }}
+  storageClassName: {{ .Values.llamaStack.persistence.storageClassName | quote }}
+  {{- end }}
+{{- end }}

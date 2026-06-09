@@ -1,0 +1,21 @@
+apiVersion: v2
+name: llm-comparison
+description: >
+  LLM Comparison Tool — simultaneously compare chat responses from multiple
+  Large Language Models using Envoy traffic mirroring and llama-stack.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - llm
+  - ai
+  - llama-stack
+  - envoy
+  - comparison
+home: https://github.com/your-org/llm-comparison-tool
+maintainers:
+  - name: your-name
+    email: your-email@example.com
+annotations:
+  # Minimum OpenShift version
+  charts.openshift.io/minKubeVersion: "1.28.0"

@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-stack
+  namespace: llm-comparison
+  labels:
+    app: llama-stack
+    component: primary-llm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llama-stack
+  template:
+    metadata:
+      labels:
+        app: llama-stack
+        component: primary-llm
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 0
+      containers:
+      - name: llama-stack
+        # Use the official llama-stack distribution image matching your provider.
+        # For Ollama backend: llamastack/distribution-ollama:latest
+        # For vLLM backend:   llamastack/distribution-remote-vllm:latest
+        image: llamastack/distribution-ollama:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8321
+          protocol: TCP
+        env:
+        - name: LLAMA_STACK_PORT
+          value: "8321"
+        - name: INFERENCE_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: llm-comparison-config
+              key: PRIMARY_MODEL
+        # For Ollama backend — update to point to your Ollama or vLLM service
+        - name: OLLAMA_URL
+          value: "http://ollama:11434"
+        # For vLLM backend:
+        # - name: VLLM_URL
+        #   value: "http://vllm:8000"
+        volumeMounts:
+        - name: llama-stack-data
+          mountPath: /root/.llama
+        - name: llama-stack-config
+          mountPath: /app/run.yaml
+          subPath: run.yaml
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8321
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          failureThreshold: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8321
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      - name: llama-stack-data
+        persistentVolumeClaim:
+          claimName: llama-stack-data
+      - name: llama-stack-config
+        configMap:
+          name: llama-stack-run-config
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llama-stack-data
+  namespace: llm-comparison
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # storageClassName: gp3-csi

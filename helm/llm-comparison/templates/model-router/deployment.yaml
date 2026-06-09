@@ -1,0 +1,115 @@
+{{- if .Values.modelRouter.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "llm-comparison.modelRouterName" . }}
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+  {{- with .Values.global.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.modelRouter.replicas }}
+  selector:
+    matchLabels:
+      {{- include "llm-comparison.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: router
+  template:
+    metadata:
+      labels:
+        {{- include "llm-comparison.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: router
+        {{- with .Values.modelRouter.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include "llm-comparison.modelRouterConfig" . | sha256sum | trunc 16 | quote }}
+        {{- with .Values.modelRouter.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "llm-comparison.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 0
+      containers:
+      - name: model-router
+        image: {{ include "llm-comparison.image" (dict "image" .Values.modelRouter.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: COLLECTOR_URL
+          value: {{ include "llm-comparison.collectorUrl" . | quote }}
+        - name: LOG_LEVEL
+          value: {{ .Values.modelRouter.logLevel | quote }}
+        - name: PRIMARY_MODEL
+          value: {{ .Values.llamaStack.primaryModel | quote }}
+        - name: MODEL_ROUTER_CONFIG_PATH
+          value: "/app/config.yaml"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "llm-comparison.apiKeySecret" . }}
+              key: OPENAI_API_KEY
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "llm-comparison.apiKeySecret" . }}
+              key: ANTHROPIC_API_KEY
+              optional: true
+        - name: TOGETHER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "llm-comparison.apiKeySecret" . }}
+              key: TOGETHER_API_KEY
+              optional: true
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 30
+        resources:
+          {{- toYaml .Values.modelRouter.resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "llm-comparison.modelRouterName" . }}-config
+      {{- with .Values.modelRouter.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.modelRouter.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.modelRouter.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

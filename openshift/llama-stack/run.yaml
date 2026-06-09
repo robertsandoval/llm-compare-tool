@@ -1,0 +1,52 @@
+# llama-stack server configuration
+# This file configures the primary LLM provider for the llama-stack server.
+# Copy this file and adjust for your environment.
+#
+# Supported providers (uncomment one):
+#   remote::ollama  — local Ollama instance
+#   remote::vllm    — vLLM server (recommended for OpenShift/GPU nodes)
+#   remote::together — Together AI
+#   remote::fireworks — Fireworks AI
+
+version: '2'
+image_name: llm-comparison-primary
+
+providers:
+  inference:
+  - provider_id: primary-inference
+    # === Option 1: Ollama (local development) ===
+    provider_type: remote::ollama
+    config:
+      url: ${env.OLLAMA_URL:http://ollama:11434}
+
+    # === Option 2: vLLM (recommended for OpenShift with GPU nodes) ===
+    # provider_type: remote::vllm
+    # config:
+    #   url: ${env.VLLM_URL:http://vllm:8000}
+
+    # === Option 3: Together AI ===
+    # provider_type: remote::together
+    # config:
+    #   url: https://api.together.xyz/v1
+    #   api_key: ${env.TOGETHER_API_KEY}
+
+  memory:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config:
+      kvstore:
+        type: sqlite
+        namespace: null
+        db_path: ${env.SQLITE_STORE_DIR:/tmp/llama-stack}/faiss_store.db
+
+metadata_store:
+  namespace: null
+  type: sqlite
+  db_path: ${env.SQLITE_STORE_DIR:/tmp/llama-stack}/registry.db
+
+models:
+- metadata: {}
+  model_id: ${env.PRIMARY_MODEL:meta-llama/Llama-3.1-8B-Instruct}
+  provider_id: primary-inference
+  provider_model_id: null
+  model_type: llm

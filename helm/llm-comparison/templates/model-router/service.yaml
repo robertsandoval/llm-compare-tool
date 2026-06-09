@@ -1,0 +1,20 @@
+{{- if .Values.modelRouter.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "llm-comparison.modelRouterName" . }}
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "llm-comparison.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+{{- end }}

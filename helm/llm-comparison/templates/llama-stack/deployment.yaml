@@ -1,0 +1,116 @@
+{{- if .Values.llamaStack.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "llm-comparison.llamaStackName" . }}
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: primary-llm
+  {{- with .Values.global.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.llamaStack.replicas }}
+  selector:
+    matchLabels:
+      {{- include "llm-comparison.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: primary-llm
+  template:
+    metadata:
+      labels:
+        {{- include "llm-comparison.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: primary-llm
+        {{- with .Values.llamaStack.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include "llm-comparison.llamaStackRunConfig" . | sha256sum | trunc 16 | quote }}
+        {{- with .Values.llamaStack.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "llm-comparison.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 0
+      containers:
+      - name: llama-stack
+        image: {{ include "llm-comparison.image" (dict "image" .Values.llamaStack.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8321
+          protocol: TCP
+        env:
+        - name: LLAMA_STACK_PORT
+          value: "8321"
+        - name: INFERENCE_MODEL
+          value: {{ .Values.llamaStack.primaryModel | quote }}
+        {{- if eq .Values.llamaStack.provider "vllm" }}
+        - name: VLLM_URL
+          value: {{ .Values.llamaStack.backendUrl | quote }}
+        {{- else }}
+        - name: OLLAMA_URL
+          value: {{ .Values.llamaStack.backendUrl | quote }}
+        {{- end }}
+        volumeMounts:
+        - name: data
+          mountPath: /root/.llama
+        - name: run-config
+          mountPath: /app/run.yaml
+          subPath: run.yaml
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8321
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          failureThreshold: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8321
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: {{ .Values.llamaStack.resources.requests.cpu }}
+            memory: {{ .Values.llamaStack.resources.requests.memory }}
+          limits:
+            cpu: {{ .Values.llamaStack.resources.limits.cpu }}
+            memory: {{ .Values.llamaStack.resources.limits.memory }}
+            {{- if .Values.llamaStack.gpuResources.enabled }}
+            {{- toYaml .Values.llamaStack.gpuResources.limits | nindent 12 }}
+            {{- end }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      - name: data
+        {{- if .Values.llamaStack.persistence.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ include "llm-comparison.llamaStackName" . }}-data
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
+      - name: run-config
+        configMap:
+          name: {{ include "llm-comparison.llamaStackName" . }}-run-config
+      {{- with .Values.llamaStack.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.llamaStack.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.llamaStack.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

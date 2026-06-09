@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-comparison-config
+  namespace: llm-comparison
+data:
+  # Primary LLM model name (used by llama-stack and the client)
+  PRIMARY_MODEL: "meta-llama/Llama-3.1-8B-Instruct"
+  # Collector service URL (internal cluster DNS)
+  COLLECTOR_URL: "http://collector:8001"
+  # Redis URL
+  REDIS_URL: "redis://redis:6379"
+  # How long to keep comparison records (seconds)
+  RECORD_TTL_SECONDS: "86400"
+  # Log level for all Python services
+  LOG_LEVEL: "INFO"
+  # llama-stack port
+  LLAMA_STACK_PORT: "8321"

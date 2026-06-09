@@ -1,0 +1,114 @@
+# values-openshift.yaml
+# OpenShift 4.21 — production overlay
+#
+# Usage:
+#   helm install llm-comparison ./helm/llm-comparison \
+#     -n llm-comparison --create-namespace \
+#     -f helm/llm-comparison/values-openshift.yaml \
+#     --set apiKeys.openai=$OPENAI_API_KEY \
+#     --set apiKeys.anthropic=$ANTHROPIC_API_KEY
+
+global:
+  imageRegistry: "quay.io/your-org"
+  imagePullPolicy: Always
+
+# Use OpenShift Routes (not Kubernetes Ingress)
+routes:
+  enabled: true
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  # Optionally pin hostnames — leave blank for auto-generated *.apps.<cluster>
+  envoy:
+    host: ""
+  collector:
+    host: ""
+  envoyAdmin:
+    enabled: false   # Disable admin route exposure in production
+
+ingress:
+  enabled: false
+
+# Scale for production
+envoy:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+modelRouter:
+  replicas: 2
+  logLevel: INFO
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  llms:
+    - name: "openai-gpt4o"
+      baseUrl: "https://api.openai.com/v1"
+      model: "gpt-4o"
+      apiKeyEnv: "OPENAI_API_KEY"
+      provider: "openai"
+      timeout: 60
+      enabled: true
+    - name: "anthropic-claude-sonnet"
+      baseUrl: "https://api.anthropic.com/v1"
+      model: "claude-3-5-sonnet-20241022"
+      apiKeyEnv: "ANTHROPIC_API_KEY"
+      provider: "anthropic"
+      timeout: 60
+      enabled: true
+
+collector:
+  replicas: 2
+  recordTtlSeconds: 172800   # 48 hours
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+redis:
+  persistence:
+    enabled: true
+    size: 5Gi
+    # storageClassName: gp3-csi   # Use your cluster's storage class
+
+# llama-stack with vLLM backend for GPU-accelerated OpenShift nodes
+llamaStack:
+  image:
+    repository: llamastack/distribution-remote-vllm
+    tag: latest
+  provider: vllm
+  backendUrl: "http://vllm:8000"   # Point to your vLLM service
+  primaryModel: "meta-llama/Llama-3.1-8B-Instruct"
+  persistence:
+    enabled: true
+    size: 20Gi
+    # storageClassName: gp3-csi
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
+  gpuResources:
+    enabled: false   # Set true and configure limits.nvidia.com/gpu if using GPU nodes
+    limits: {}
+  # Pin to GPU-enabled node pool
+  nodeSelector: {}
+    # node-role.kubernetes.io/gpu: "true"
+  tolerations: []
+    # - key: nvidia.com/gpu
+    #   operator: Exists
+    #   effect: NoSchedule

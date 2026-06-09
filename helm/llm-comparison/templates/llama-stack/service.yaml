@@ -1,0 +1,20 @@
+{{- if .Values.llamaStack.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "llm-comparison.llamaStackName" . }}
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: primary-llm
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "llm-comparison.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: primary-llm
+  ports:
+  - name: http
+    port: 8321
+    targetPort: 8321
+    protocol: TCP
+{{- end }}

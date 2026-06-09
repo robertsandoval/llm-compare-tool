@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-router
+  namespace: llm-comparison
+  labels:
+    app: model-router
+    component: router
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-router
+  template:
+    metadata:
+      labels:
+        app: model-router
+        component: router
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 0
+      containers:
+      - name: model-router
+        # Replace with your image registry path after building and pushing
+        image: quay.io/your-org/llm-comparison-model-router:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: COLLECTOR_URL
+          valueFrom:
+            configMapKeyRef:
+              name: llm-comparison-config
+              key: COLLECTOR_URL
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: llm-comparison-config
+              key: LOG_LEVEL
+        - name: PRIMARY_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: llm-comparison-config
+              key: PRIMARY_MODEL
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-api-keys
+              key: OPENAI_API_KEY
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-api-keys
+              key: ANTHROPIC_API_KEY
+              optional: true
+        - name: TOGETHER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-api-keys
+              key: TOGETHER_API_KEY
+              optional: true
+        volumeMounts:
+        - name: model-router-config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+          readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      - name: model-router-config
+        configMap:
+          name: model-router-config

@@ -1,0 +1,78 @@
+{{- if .Values.routes.enabled }}
+---
+# Envoy — main API gateway for client requests
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "llm-comparison.envoyName" . }}
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  {{- if .Values.routes.envoy.host }}
+  host: {{ .Values.routes.envoy.host | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: {{ include "llm-comparison.envoyName" . }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: {{ .Values.routes.tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .Values.routes.tls.insecureEdgeTerminationPolicy }}
+  wildcardPolicy: None
+
+---
+# Collector — for querying comparison results
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "llm-comparison.collectorName" . }}
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+spec:
+  {{- if .Values.routes.collector.host }}
+  host: {{ .Values.routes.collector.host | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: {{ include "llm-comparison.collectorName" . }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: {{ .Values.routes.tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .Values.routes.tls.insecureEdgeTerminationPolicy }}
+  wildcardPolicy: None
+
+{{- if .Values.routes.envoyAdmin.enabled }}
+---
+# Envoy admin — observability dashboard (restrict or disable in production)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "llm-comparison.envoyName" . }}-admin
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  {{- if .Values.routes.envoyAdmin.host }}
+  host: {{ .Values.routes.envoyAdmin.host | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: {{ include "llm-comparison.envoyName" . }}
+    weight: 100
+  port:
+    targetPort: admin
+  tls:
+    termination: {{ .Values.routes.tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .Values.routes.tls.insecureEdgeTerminationPolicy }}
+  wildcardPolicy: None
+{{- end }}
+{{- end }}

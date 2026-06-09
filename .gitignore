@@ -1,0 +1,23 @@
+# Environment files — never commit API keys
+.env
+openshift/secret.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Docker
+*.log

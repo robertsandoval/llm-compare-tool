@@ -1,0 +1,69 @@
+{{- $fullname := include "llm-comparison.fullname" . -}}
+{{- $ns := include "llm-comparison.namespace" . -}}
+
+Thank you for installing {{ .Chart.Name }} v{{ .Chart.Version }}!
+
+Release:   {{ .Release.Name }}
+Namespace: {{ $ns }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  COMPONENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if .Values.envoy.enabled }}
+  ✓  Envoy Proxy        {{ include "llm-comparison.envoyName" . }}:8080
+{{- end }}
+{{- if .Values.modelRouter.enabled }}
+  ✓  Model Router       {{ include "llm-comparison.modelRouterName" . }}:8000
+{{- end }}
+{{- if .Values.collector.enabled }}
+  ✓  Collector          {{ include "llm-comparison.collectorName" . }}:8001
+{{- end }}
+{{- if .Values.redis.enabled }}
+  ✓  Redis              {{ include "llm-comparison.redisName" . }}:6379
+{{- end }}
+{{- if .Values.llamaStack.enabled }}
+  ✓  llama-stack        {{ include "llm-comparison.llamaStackName" . }}:8321
+     Primary model:     {{ .Values.llamaStack.primaryModel }}
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECONDARY LLMs CONFIGURED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- range .Values.modelRouter.llms }}
+  {{ if .enabled }}✓{{ else }}✗{{ end }}  {{ .name }} → {{ .model }}
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  QUICK START
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if .Values.routes.enabled }}
+  # Get OpenShift route URLs
+  oc get routes -n {{ $ns }}
+
+{{- else if .Values.ingress.enabled }}
+  # Get Ingress address
+  kubectl get ingress -n {{ $ns }}
+
+{{- else }}
+  # Forward Envoy port locally
+  kubectl port-forward -n {{ $ns }} svc/{{ include "llm-comparison.envoyName" . }} 8080:8080 &
+
+  # Forward Collector port locally
+  kubectl port-forward -n {{ $ns }} svc/{{ include "llm-comparison.collectorName" . }} 8001:8001 &
+{{- end }}
+
+  # Send a prompt (from the client/ directory)
+  ENVOY_URL=<envoy-url> COLLECTOR_URL=<collector-url> \
+    python compare_client.py --prompt "Explain transformers in ML"
+
+  # List recent comparisons
+  curl <collector-url>/comparisons
+
+  # View Envoy admin dashboard
+  kubectl port-forward -n {{ $ns }} svc/{{ include "llm-comparison.envoyName" . }} 9901:9901
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if not .Values.apiKeys.existingSecret }}
+  ⚠  API keys were provided via values. For production use
+     existingSecret pointing to a pre-created Secret.
+{{- end }}

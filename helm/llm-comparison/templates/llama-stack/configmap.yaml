@@ -1,0 +1,13 @@
+{{- if .Values.llamaStack.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "llm-comparison.llamaStackName" . }}-run-config
+  namespace: {{ include "llm-comparison.namespace" . }}
+  labels:
+    {{- include "llm-comparison.labels" . | nindent 4 }}
+    app.kubernetes.io/component: primary-llm
+data:
+  run.yaml: |
+    {{- include "llm-comparison.llamaStackRunConfig" . | nindent 4 }}
+{{- end }}

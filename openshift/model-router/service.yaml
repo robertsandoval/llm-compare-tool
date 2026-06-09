@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-router
+  namespace: llm-comparison
+  labels:
+    app: model-router
+spec:
+  selector:
+    app: model-router
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  type: ClusterIP
+---
+# ConfigMap for model-router config.yaml
+# Edit the llms list to add/remove secondary LLMs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-router-config
+  namespace: llm-comparison
+data:
+  config.yaml: |
+    llms:
+      - name: "openai-gpt4o"
+        base_url: "https://api.openai.com/v1"
+        model: "gpt-4o"
+        api_key_env: "OPENAI_API_KEY"
+        provider: "openai"
+        timeout: 60
+        enabled: true
+
+      - name: "anthropic-claude-sonnet"
+        base_url: "https://api.anthropic.com/v1"
+        model: "claude-3-5-sonnet-20241022"
+        api_key_env: "ANTHROPIC_API_KEY"
+        provider: "anthropic"
+        timeout: 60
+        enabled: true
+
+      - name: "together-llama70b"
+        base_url: "https://api.together.xyz/v1"
+        model: "meta-llama/Llama-3.1-70B-Instruct-Turbo"
+        api_key_env: "TOGETHER_API_KEY"
+        provider: "openai_compatible"
+        timeout: 60
+        enabled: false
+
+    collector:
+      url: "http://collector:8001"
+      timeout: 5
+      capture_primary: true
+      primary_name: "llama-stack-primary"
+      primary_url: "http://llama-stack:8321/v1"
+      primary_model_env: "PRIMARY_MODEL"
+      primary_model_default: "meta-llama/Llama-3.1-8B-Instruct"
