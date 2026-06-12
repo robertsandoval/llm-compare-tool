@@ -23,10 +23,9 @@ spec:
         fsGroup: 0
       containers:
       - name: llama-stack
-        # Use the official llama-stack distribution image matching your provider.
-        # For Ollama backend: llamastack/distribution-ollama:latest
-        # For vLLM backend:   llamastack/distribution-remote-vllm:latest
-        image: llamastack/distribution-ollama:latest
+        # Multi-provider llama-stack distribution — built from llama-stack/Dockerfile.
+        # Fronts ALL LLMs (primary + secondary) through a single /v1/inference endpoint.
+        image: quay.io/your-org/llm-comparison-llama-stack:latest
         imagePullPolicy: Always
         ports:
         - name: http
@@ -35,17 +34,35 @@ spec:
         env:
         - name: LLAMA_STACK_PORT
           value: "8321"
-        - name: INFERENCE_MODEL
+        - name: PRIMARY_MODEL
           valueFrom:
             configMapKeyRef:
               name: llm-comparison-config
               key: PRIMARY_MODEL
-        # For Ollama backend — update to point to your Ollama or vLLM service
+        # Self-hosted backend URL (Ollama or vLLM)
         - name: OLLAMA_URL
           value: "http://ollama:11434"
-        # For vLLM backend:
         # - name: VLLM_URL
         #   value: "http://vllm:8000"
+        # Provider API keys — all injected from the shared secret
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-api-keys
+              key: OPENAI_API_KEY
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-api-keys
+              key: ANTHROPIC_API_KEY
+              optional: true
+        - name: TOGETHER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-api-keys
+              key: TOGETHER_API_KEY
+              optional: true
         volumeMounts:
         - name: llama-stack-data
           mountPath: /root/.llama

@@ -148,15 +148,16 @@ llama-stack primary URL built from the internal service name.
 
 {{/*
 Render the model-router config.yaml content from values.
+All LLMs are reached via the shared llama-stack server.
 */}}
 {{- define "llm-comparison.modelRouterConfig" -}}
+llama_stack:
+  url: {{ printf "http://%s:8321" (include "llm-comparison.llamaStackName" .) | quote }}
+
 llms:
 {{- range .Values.modelRouter.llms }}
   - name: {{ .name | quote }}
-    base_url: {{ .baseUrl | quote }}
-    model: {{ .model | quote }}
-    api_key_env: {{ .apiKeyEnv | quote }}
-    provider: {{ .provider | quote }}
+    model_id: {{ .modelId | quote }}
     timeout: {{ .timeout }}
     enabled: {{ .enabled }}
 {{- end }}
@@ -166,30 +167,46 @@ collector:
   timeout: {{ .Values.modelRouter.collector.timeout }}
   capture_primary: {{ .Values.modelRouter.collector.capturePrimary }}
   primary_name: {{ .Values.modelRouter.collector.primaryName | quote }}
-  primary_url: {{ include "llm-comparison.llamaStackUrl" . | quote }}
   primary_model_env: "PRIMARY_MODEL"
   primary_model_default: {{ .Values.llamaStack.primaryModel | quote }}
 {{- end }}
 
 {{/*
 Render the llama-stack run.yaml content from values.
+Registers all configured models (primary + all secondary LLMs) with their providers.
 */}}
 {{- define "llm-comparison.llamaStackRunConfig" -}}
 version: '2'
-image_name: llm-comparison-primary
+image_name: llm-comparison-multi-provider
 
 providers:
   inference:
-  - provider_id: primary-inference
+  # Self-hosted primary backend
 {{- if eq .Values.llamaStack.provider "vllm" }}
+  - provider_id: vllm
     provider_type: remote::vllm
     config:
       url: {{ .Values.llamaStack.backendUrl | quote }}
 {{- else }}
+  - provider_id: ollama
     provider_type: remote::ollama
     config:
       url: {{ .Values.llamaStack.backendUrl | quote }}
 {{- end }}
+  # Cloud providers (credentials injected via env vars from Secret)
+  - provider_id: openai
+    provider_type: remote::openai
+    config:
+      api_key: ${env.OPENAI_API_KEY}
+  - provider_id: anthropic
+    provider_type: remote::anthropic
+    config:
+      api_key: ${env.ANTHROPIC_API_KEY}
+  - provider_id: together
+    provider_type: remote::together
+    config:
+      api_key: ${env.TOGETHER_API_KEY}
+
   memory:
   - provider_id: faiss
     provider_type: inline::faiss
@@ -205,9 +222,16 @@ metadata_store:
   db_path: /root/.llama/registry.db
 
 models:
-- metadata: {}
-  model_id: {{ .Values.llamaStack.primaryModel | quote }}
-  provider_id: primary-inference
-  provider_model_id: null
+# Primary self-hosted model
+- model_id: {{ .Values.llamaStack.primaryModel | quote }}
+  provider_id: {{ if eq .Values.llamaStack.provider "vllm" }}vllm{{ else }}ollama{{ end }}
+  provider_model_id: {{ .Values.llamaStack.primaryModelId | default .Values.llamaStack.primaryModel | quote }}
   model_type: llm
+# Secondary models — one entry per enabled LLM in modelRouter.llms
+{{- range .Values.modelRouter.llms }}
+- model_id: {{ .modelId | quote }}
+  provider_id: {{ .providerId | quote }}
+  provider_model_id: {{ .providerModelId | default .modelId | quote }}
+  model_type: llm
+{{- end }}
 {{- end }}

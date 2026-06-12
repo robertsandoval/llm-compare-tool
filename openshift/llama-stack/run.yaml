@@ -1,34 +1,45 @@
-# llama-stack server configuration
-# This file configures the primary LLM provider for the llama-stack server.
-# Copy this file and adjust for your environment.
+# llama-stack server configuration — multi-provider distribution
 #
-# Supported providers (uncomment one):
-#   remote::ollama  — local Ollama instance
-#   remote::vllm    — vLLM server (recommended for OpenShift/GPU nodes)
-#   remote::together — Together AI
-#   remote::fireworks — Fireworks AI
+# This configures a SINGLE llama-stack server that routes inference requests
+# to the correct backend based on model_id.  All LLMs in the comparison tool
+# (primary and secondary) are registered here.
+#
+# Required environment variables (inject via Secret in OpenShift):
+#   OPENAI_API_KEY, ANTHROPIC_API_KEY, TOGETHER_API_KEY
+#   OLLAMA_URL (or VLLM_URL for GPU nodes)
 
 version: '2'
-image_name: llm-comparison-primary
+image_name: llm-comparison-multi-provider
 
 providers:
   inference:
-  - provider_id: primary-inference
-    # === Option 1: Ollama (local development) ===
+  # ── Primary: self-hosted model (Ollama or vLLM) ────────────────────────────
+  - provider_id: ollama
     provider_type: remote::ollama
     config:
       url: ${env.OLLAMA_URL:http://ollama:11434}
 
-    # === Option 2: vLLM (recommended for OpenShift with GPU nodes) ===
-    # provider_type: remote::vllm
-    # config:
-    #   url: ${env.VLLM_URL:http://vllm:8000}
+  # Switch to vLLM for GPU-accelerated OpenShift nodes:
+  # - provider_id: vllm
+  #   provider_type: remote::vllm
+  #   config:
+  #     url: ${env.VLLM_URL:http://vllm:8000}
 
-    # === Option 3: Together AI ===
-    # provider_type: remote::together
-    # config:
-    #   url: https://api.together.xyz/v1
-    #   api_key: ${env.TOGETHER_API_KEY}
+  # ── Secondary: cloud providers ─────────────────────────────────────────────
+  - provider_id: openai
+    provider_type: remote::openai
+    config:
+      api_key: ${env.OPENAI_API_KEY}
+
+  - provider_id: anthropic
+    provider_type: remote::anthropic
+    config:
+      api_key: ${env.ANTHROPIC_API_KEY}
+
+  - provider_id: together
+    provider_type: remote::together
+    config:
+      api_key: ${env.TOGETHER_API_KEY}
 
   memory:
   - provider_id: faiss
@@ -37,16 +48,47 @@ providers:
       kvstore:
         type: sqlite
         namespace: null
-        db_path: ${env.SQLITE_STORE_DIR:/tmp/llama-stack}/faiss_store.db
+        db_path: ${env.SQLITE_STORE_DIR:/root/.llama}/faiss_store.db
 
 metadata_store:
   namespace: null
   type: sqlite
-  db_path: ${env.SQLITE_STORE_DIR:/tmp/llama-stack}/registry.db
+  db_path: ${env.SQLITE_STORE_DIR:/root/.llama}/registry.db
 
+# ── Model registry ─────────────────────────────────────────────────────────────
+# Each model_id here must match an entry in model-router/config.yaml.
+# Add or remove models freely — just keep both files in sync.
 models:
-- metadata: {}
-  model_id: ${env.PRIMARY_MODEL:meta-llama/Llama-3.1-8B-Instruct}
-  provider_id: primary-inference
-  provider_model_id: null
+# Primary self-hosted model
+- model_id: ${env.PRIMARY_MODEL:meta-llama/Llama-3.1-8B-Instruct}
+  provider_id: ollama
+  provider_model_id: ${env.OLLAMA_PRIMARY_MODEL_ID:llama3.1:8b}
+  model_type: llm
+
+# OpenAI
+- model_id: gpt-4o
+  provider_id: openai
+  provider_model_id: gpt-4o
+  model_type: llm
+
+- model_id: gpt-4o-mini
+  provider_id: openai
+  provider_model_id: gpt-4o-mini
+  model_type: llm
+
+# Anthropic
+- model_id: claude-3-5-sonnet-20241022
+  provider_id: anthropic
+  provider_model_id: claude-3-5-sonnet-20241022
+  model_type: llm
+
+- model_id: claude-3-haiku-20240307
+  provider_id: anthropic
+  provider_model_id: claude-3-haiku-20240307
+  model_type: llm
+
+# Together AI (disabled in model-router by default; enable in config.yaml)
+- model_id: meta-llama/Llama-3.1-70B-Instruct-Turbo
+  provider_id: together
+  provider_model_id: meta-llama/Llama-3.1-70B-Instruct-Turbo
   model_type: llm

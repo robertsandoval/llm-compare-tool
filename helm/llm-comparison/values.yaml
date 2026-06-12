@@ -86,38 +86,35 @@ modelRouter:
   affinity: {}
 
   # Secondary LLM configuration.
-  # Each entry defines one LLM that receives a mirrored request with its
-  # model name substituted for the original.
+  # Each entry maps a friendly name to a model_id registered in the llama-stack
+  # run.yaml.  llama-stack resolves model_id → provider → backend internally.
+  # providerId must match a provider_id entry in llamaStack.providers (run.yaml).
   llms:
     - name: "openai-gpt4o"
-      baseUrl: "https://api.openai.com/v1"
-      model: "gpt-4o"
-      apiKeyEnv: "OPENAI_API_KEY"
-      provider: "openai"
+      modelId: "gpt-4o"
+      providerId: "openai"
+      providerModelId: "gpt-4o"
       timeout: 60
       enabled: true
 
     - name: "anthropic-claude-sonnet"
-      baseUrl: "https://api.anthropic.com/v1"
-      model: "claude-3-5-sonnet-20241022"
-      apiKeyEnv: "ANTHROPIC_API_KEY"
-      provider: "anthropic"
+      modelId: "claude-3-5-sonnet-20241022"
+      providerId: "anthropic"
+      providerModelId: "claude-3-5-sonnet-20241022"
       timeout: 60
       enabled: true
 
     - name: "together-llama70b"
-      baseUrl: "https://api.together.xyz/v1"
-      model: "meta-llama/Llama-3.1-70B-Instruct-Turbo"
-      apiKeyEnv: "TOGETHER_API_KEY"
-      provider: "openai_compatible"
+      modelId: "meta-llama/Llama-3.1-70B-Instruct-Turbo"
+      providerId: "together"
+      providerModelId: "meta-llama/Llama-3.1-70B-Instruct-Turbo"
       timeout: 60
       enabled: false
 
     - name: "ollama-llama70b"
-      baseUrl: "http://ollama:11434/v1"
-      model: "llama3.1:70b"
-      apiKeyEnv: ""
-      provider: "openai_compatible"
+      modelId: "llama3.1:70b"
+      providerId: "ollama"
+      providerModelId: "llama3.1:70b"
       timeout: 120
       enabled: false
 
@@ -196,6 +193,8 @@ llamaStack:
       memory: 4Gi
   # Model to serve as the primary LLM
   primaryModel: "meta-llama/Llama-3.1-8B-Instruct"
+  # provider_model_id passed to the self-hosted backend (e.g. Ollama tag name)
+  primaryModelId: "llama3.1:8b"
   # Backend provider: ollama | vllm
   provider: ollama
   # URL of the backend inference server

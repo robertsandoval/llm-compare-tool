@@ -53,24 +53,6 @@ spec:
           value: {{ .Values.llamaStack.primaryModel | quote }}
         - name: MODEL_ROUTER_CONFIG_PATH
           value: "/app/config.yaml"
-        - name: OPENAI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "llm-comparison.apiKeySecret" . }}
-              key: OPENAI_API_KEY
-              optional: true
-        - name: ANTHROPIC_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "llm-comparison.apiKeySecret" . }}
-              key: ANTHROPIC_API_KEY
-              optional: true
-        - name: TOGETHER_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "llm-comparison.apiKeySecret" . }}
-              key: TOGETHER_API_KEY
-              optional: true
         volumeMounts:
         - name: config
           mountPath: /app/config.yaml

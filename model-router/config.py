@@ -1,8 +1,10 @@
 """
 Model Router Configuration Loader
 
-Reads config.yaml (or path from MODEL_ROUTER_CONFIG_PATH env var) and
-exposes typed configuration objects to the rest of the application.
+All LLM calls are routed through a single llama-stack server.
+LLMConfig no longer carries provider credentials or base URLs — those live
+exclusively in the llama-stack run.yaml.  Each entry here only needs the
+model_id that is registered in llama-stack.
 """
 
 import os
@@ -12,20 +14,19 @@ from typing import List, Optional
 
 
 @dataclass
+class LlamaStackConfig:
+    """Connection details for the shared llama-stack server."""
+    url: str = "http://llama-stack:8321"
+
+
+@dataclass
 class LLMConfig:
+    """One secondary LLM to fan out to via llama-stack."""
     name: str
-    base_url: str
-    model: str
-    provider: str  # "openai" | "anthropic" | "openai_compatible"
-    api_key_env: str
+    # Must match a model_id registered in the llama-stack run.yaml
+    model_id: str
     timeout: int = 60
     enabled: bool = True
-
-    @property
-    def api_key(self) -> Optional[str]:
-        if not self.api_key_env:
-            return None
-        return os.environ.get(self.api_key_env)
 
 
 @dataclass
@@ -34,7 +35,6 @@ class CollectorConfig:
     timeout: int = 5
     capture_primary: bool = True
     primary_name: str = "llama-stack-primary"
-    primary_url: str = "http://llama-stack:8321/v1"
     primary_model_env: str = "PRIMARY_MODEL"
     primary_model_default: str = "meta-llama/Llama-3.1-8B-Instruct"
 
@@ -45,6 +45,7 @@ class CollectorConfig:
 
 @dataclass
 class AppConfig:
+    llama_stack: LlamaStackConfig = field(default_factory=LlamaStackConfig)
     llms: List[LLMConfig] = field(default_factory=list)
     collector: CollectorConfig = field(default_factory=CollectorConfig)
 
@@ -62,9 +63,8 @@ def load_config(path: Optional[str] = None) -> AppConfig:
     with open(config_path, "r") as f:
         raw = yaml.safe_load(f)
 
+    llama_stack = LlamaStackConfig(**raw.get("llama_stack", {}))
     llms = [LLMConfig(**entry) for entry in raw.get("llms", [])]
+    collector = CollectorConfig(**raw.get("collector", {}))
 
-    collector_raw = raw.get("collector", {})
-    collector = CollectorConfig(**collector_raw)
-
-    return AppConfig(llms=llms, collector=collector)
+    return AppConfig(llama_stack=llama_stack, llms=llms, collector=collector)

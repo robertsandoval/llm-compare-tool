@@ -52,17 +52,15 @@ modelRouter:
       memory: 1Gi
   llms:
     - name: "openai-gpt4o"
-      baseUrl: "https://api.openai.com/v1"
-      model: "gpt-4o"
-      apiKeyEnv: "OPENAI_API_KEY"
-      provider: "openai"
+      modelId: "gpt-4o"
+      providerId: "openai"
+      providerModelId: "gpt-4o"
       timeout: 60
       enabled: true
     - name: "anthropic-claude-sonnet"
-      baseUrl: "https://api.anthropic.com/v1"
-      model: "claude-3-5-sonnet-20241022"
-      apiKeyEnv: "ANTHROPIC_API_KEY"
-      provider: "anthropic"
+      modelId: "claude-3-5-sonnet-20241022"
+      providerId: "anthropic"
+      providerModelId: "claude-3-5-sonnet-20241022"
       timeout: 60
       enabled: true
 
@@ -86,11 +84,12 @@ redis:
 # llama-stack with vLLM backend for GPU-accelerated OpenShift nodes
 llamaStack:
   image:
-    repository: llamastack/distribution-remote-vllm
+    repository: llm-comparison-llama-stack
     tag: latest
   provider: vllm
   backendUrl: "http://vllm:8000"   # Point to your vLLM service
   primaryModel: "meta-llama/Llama-3.1-8B-Instruct"
+  primaryModelId: "meta-llama/Llama-3.1-8B-Instruct"
   persistence:
     enabled: true
     size: 20Gi

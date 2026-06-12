@@ -47,7 +47,7 @@ spec:
         env:
         - name: LLAMA_STACK_PORT
           value: "8321"
-        - name: INFERENCE_MODEL
+        - name: PRIMARY_MODEL
           value: {{ .Values.llamaStack.primaryModel | quote }}
         {{- if eq .Values.llamaStack.provider "vllm" }}
         - name: VLLM_URL
@@ -56,6 +56,26 @@ spec:
         - name: OLLAMA_URL
           value: {{ .Values.llamaStack.backendUrl | quote }}
         {{- end }}
+        # Cloud provider API keys — all secondary LLMs are fronted by llama-stack
+        # so it needs the credentials, not the model-router.
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "llm-comparison.apiKeySecret" . }}
+              key: OPENAI_API_KEY
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "llm-comparison.apiKeySecret" . }}
+              key: ANTHROPIC_API_KEY
+              optional: true
+        - name: TOGETHER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "llm-comparison.apiKeySecret" . }}
+              key: TOGETHER_API_KEY
+              optional: true
         volumeMounts:
         - name: data
           mountPath: /root/.llama

@@ -1,0 +1,36 @@
+# Multi-provider llama-stack distribution
+#
+# Installs llama-stack plus the provider packages needed for all configured
+# backends (Ollama, OpenAI, Anthropic, Together).
+#
+# Build:
+#   docker build -t quay.io/your-org/llm-comparison-llama-stack:latest \
+#                -f llama-stack/Dockerfile llama-stack/
+#
+# The run.yaml is mounted from a ConfigMap in OpenShift (or from the local
+# directory in docker-compose).  It is NOT baked into the image so you can
+# change the model registry without a rebuild.
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install llama-stack and all provider adapters used in run.yaml
+RUN pip install --no-cache-dir \
+    "llama-stack>=0.2.0" \
+    "llama-stack-provider-remote-vllm" \
+    "openai>=1.0.0" \
+    "anthropic>=0.30.0" \
+    "together>=1.2.0"
+
+# The run.yaml is mounted at runtime; include a default for local dev
+COPY run.yaml /app/run.yaml
+
+RUN useradd -u 1001 -r -g 0 -s /sbin/nologin appuser && \
+    mkdir -p /root/.llama && \
+    chown -R 1001:0 /app /root/.llama
+USER 1001
+
+EXPOSE 8321
+
+CMD ["llama", "stack", "run", "/app/run.yaml", "--port", "8321"]

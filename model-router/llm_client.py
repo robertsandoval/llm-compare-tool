@@ -1,9 +1,12 @@
 """
-LLM Client
+LLM Client — llama-stack edition
 
-Thin async wrappers around OpenAI-compatible and Anthropic APIs.
-All providers are normalized to the OpenAI chat completion request/response format
-so the model-router can handle them uniformly.
+All secondary LLM calls go through the shared llama-stack server via its
+native /v1/inference/chat_completion endpoint.  llama-stack resolves the
+model_id to the correct backend provider (Ollama, OpenAI, Anthropic, etc.)
+and handles all provider-specific translation internally.
+
+This module contains zero provider-specific logic.
 """
 
 import time
@@ -16,6 +19,9 @@ from config import LLMConfig
 
 logger = logging.getLogger(__name__)
 
+# llama-stack native inference endpoint
+_CHAT_COMPLETION_PATH = "/v1/inference/chat_completion"
+
 
 class LLMCallError(Exception):
     def __init__(self, llm_name: str, status_code: Optional[int], message: str):
@@ -27,43 +33,25 @@ class LLMCallError(Exception):
 async def call_llm(
     client: httpx.AsyncClient,
     llm: LLMConfig,
+    llama_stack_url: str,
     request_body: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Send a chat completion request to a single LLM backend.
+    Forward a single chat completion request to llama-stack.
 
-    Rewrites the `model` field in request_body to llm.model.
-    Returns a normalized response dict with timing metadata.
+    Translates the incoming OpenAI-format body to the llama-stack
+    /v1/inference/chat_completion format, posts it, and translates the
+    response back to OpenAI format so the collector receives a uniform shape.
     """
-    body = {**request_body, "model": llm.model}
-
-    # Anthropic uses a slightly different API format
-    if llm.provider == "anthropic":
-        return await _call_anthropic(client, llm, body)
-
-    return await _call_openai_compatible(client, llm, body)
-
-
-async def _call_openai_compatible(
-    client: httpx.AsyncClient,
-    llm: LLMConfig,
-    body: Dict[str, Any],
-) -> Dict[str, Any]:
-    headers = {"Content-Type": "application/json"}
-    if llm.api_key:
-        headers["Authorization"] = f"Bearer {llm.api_key}"
-
-    url = f"{llm.base_url.rstrip('/')}/chat/completions"
-
-    # Disable streaming for comparison collection — we need the full response
-    body = {**body, "stream": False}
+    ls_body = _openai_to_llama_stack(request_body, llm.model_id)
+    url = f"{llama_stack_url.rstrip('/')}{_CHAT_COMPLETION_PATH}"
 
     start = time.monotonic()
     try:
         response = await client.post(
             url,
-            json=body,
-            headers=headers,
+            json=ls_body,
+            headers={"Content-Type": "application/json"},
             timeout=llm.timeout,
         )
         elapsed = time.monotonic() - start
@@ -72,70 +60,7 @@ async def _call_openai_compatible(
             raise LLMCallError(llm.name, response.status_code, response.text[:500])
 
         data = response.json()
-        return _annotate_response(data, llm.name, elapsed)
-
-    except httpx.TimeoutException as exc:
-        elapsed = time.monotonic() - start
-        raise LLMCallError(llm.name, None, f"Timeout after {elapsed:.1f}s") from exc
-    except httpx.RequestError as exc:
-        elapsed = time.monotonic() - start
-        raise LLMCallError(llm.name, None, str(exc)) from exc
-
-
-async def _call_anthropic(
-    client: httpx.AsyncClient,
-    llm: LLMConfig,
-    body: Dict[str, Any],
-) -> Dict[str, Any]:
-    """
-    Translate OpenAI chat completion format → Anthropic Messages API format,
-    then translate the response back to OpenAI format.
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-    }
-    if llm.api_key:
-        headers["x-api-key"] = llm.api_key
-
-    # Separate system prompt from messages
-    messages = body.get("messages", [])
-    system_content = None
-    user_messages = []
-    for msg in messages:
-        if msg.get("role") == "system":
-            system_content = msg.get("content", "")
-        else:
-            user_messages.append(msg)
-
-    anthropic_body: Dict[str, Any] = {
-        "model": llm.model,
-        "messages": user_messages,
-        "max_tokens": body.get("max_tokens", 2048),
-    }
-    if system_content:
-        anthropic_body["system"] = system_content
-    if "temperature" in body:
-        anthropic_body["temperature"] = body["temperature"]
-
-    url = f"{llm.base_url.rstrip('/')}/messages"
-
-    start = time.monotonic()
-    try:
-        response = await client.post(
-            url,
-            json=anthropic_body,
-            headers=headers,
-            timeout=llm.timeout,
-        )
-        elapsed = time.monotonic() - start
-
-        if response.status_code != 200:
-            raise LLMCallError(llm.name, response.status_code, response.text[:500])
-
-        data = response.json()
-        # Translate Anthropic response → OpenAI format
-        openai_format = _anthropic_to_openai(data, llm.model)
+        openai_format = _llama_stack_to_openai(data, llm.model_id)
         return _annotate_response(openai_format, llm.name, elapsed)
 
     except httpx.TimeoutException as exc:
@@ -146,29 +71,69 @@ async def _call_anthropic(
         raise LLMCallError(llm.name, None, str(exc)) from exc
 
 
-def _anthropic_to_openai(data: Dict[str, Any], model: str) -> Dict[str, Any]:
-    content_blocks = data.get("content", [])
-    text = " ".join(
-        block.get("text", "") for block in content_blocks if block.get("type") == "text"
-    )
+# ── Format translation helpers ─────────────────────────────────────────────────
+
+def _openai_to_llama_stack(body: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+    """
+    OpenAI chat completion format → llama-stack /v1/inference/chat_completion format.
+
+    OpenAI:
+      { "model": "...", "messages": [...], "temperature": 0.7, "max_tokens": 512 }
+
+    llama-stack:
+      { "model_id": "...", "messages": [...], "sampling_params": { "temperature": 0.7, "max_tokens": 512 } }
+    """
+    ls_body: Dict[str, Any] = {
+        "model_id": model_id,
+        "messages": body.get("messages", []),
+    }
+
+    sampling: Dict[str, Any] = {}
+    if "temperature" in body:
+        sampling["temperature"] = body["temperature"]
+    if "max_tokens" in body:
+        sampling["max_tokens"] = body["max_tokens"]
+    if "top_p" in body:
+        sampling["top_p"] = body["top_p"]
+    if sampling:
+        ls_body["sampling_params"] = sampling
+
+    return ls_body
+
+
+def _llama_stack_to_openai(data: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+    """
+    llama-stack /v1/inference/chat_completion response → OpenAI chat completion format.
+
+    llama-stack response:
+      { "completion_message": { "role": "assistant", "content": "...", "stop_reason": "end_of_turn" } }
+    """
+    completion = data.get("completion_message", {})
+    content = completion.get("content", "")
+    # llama-stack may return content as a TextDelta object; flatten to string
+    if isinstance(content, dict):
+        content = content.get("text", "")
+
     return {
         "id": data.get("id", ""),
         "object": "chat.completion",
         "created": 0,
-        "model": model,
+        "model": model_id,
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": text},
-                "finish_reason": data.get("stop_reason", "stop"),
+                "message": {
+                    "role": completion.get("role", "assistant"),
+                    "content": content,
+                },
+                "finish_reason": str(completion.get("stop_reason", "stop")),
             }
         ],
         "usage": {
-            "prompt_tokens": data.get("usage", {}).get("input_tokens", 0),
-            "completion_tokens": data.get("usage", {}).get("output_tokens", 0),
+            "prompt_tokens": data.get("prompt_tokens", 0),
+            "completion_tokens": data.get("completion_tokens", 0),
             "total_tokens": (
-                data.get("usage", {}).get("input_tokens", 0)
-                + data.get("usage", {}).get("output_tokens", 0)
+                data.get("prompt_tokens", 0) + data.get("completion_tokens", 0)
             ),
         },
     }
@@ -177,7 +142,6 @@ def _anthropic_to_openai(data: Dict[str, Any], model: str) -> Dict[str, Any]:
 def _annotate_response(
     data: Dict[str, Any], llm_name: str, elapsed: float
 ) -> Dict[str, Any]:
-    """Attach comparison metadata to a response dict."""
     data["_comparison"] = {
         "llm_name": llm_name,
         "latency_seconds": round(elapsed, 3),

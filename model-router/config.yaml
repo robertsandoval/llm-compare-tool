@@ -1,47 +1,35 @@
+# llama-stack server connection (shared by all secondary LLM calls)
+llama_stack:
+  url: "http://llama-stack:8321"
+
 llms:
-  # Each entry defines a secondary LLM that receives mirrored requests.
-  # The model-router substitutes the original model name with the one specified here.
+  # Each entry maps a friendly name to a model_id registered in llama-stack's run.yaml.
+  # llama-stack routes each model_id to the correct backend provider.
 
   - name: "openai-gpt4o"
-    base_url: "https://api.openai.com/v1"
-    model: "gpt-4o"
-    api_key_env: "OPENAI_API_KEY"
-    # provider: openai | anthropic | openai_compatible
-    provider: "openai"
+    model_id: "gpt-4o"
     timeout: 60
     enabled: true
 
   - name: "anthropic-claude-sonnet"
-    base_url: "https://api.anthropic.com/v1"
-    model: "claude-3-5-sonnet-20241022"
-    api_key_env: "ANTHROPIC_API_KEY"
-    provider: "anthropic"
+    model_id: "claude-3-5-sonnet-20241022"
     timeout: 60
     enabled: true
 
   - name: "together-llama70b"
-    base_url: "https://api.together.xyz/v1"
-    model: "meta-llama/Llama-3.1-70B-Instruct-Turbo"
-    api_key_env: "TOGETHER_API_KEY"
-    provider: "openai_compatible"
+    model_id: "meta-llama/Llama-3.1-70B-Instruct-Turbo"
     timeout: 60
     enabled: false
 
   - name: "ollama-llama70b"
-    base_url: "http://ollama:11434/v1"
-    model: "llama3.1:70b"
-    api_key_env: ""
-    provider: "openai_compatible"
+    model_id: "llama3.1:70b"
     timeout: 120
     enabled: false
 
 collector:
   url: "http://collector:8001"
   timeout: 5
-  # Also capture the primary LLM response by re-calling it from the model-router.
-  # Set to false if you have a separate interceptor on the primary path.
   capture_primary: true
   primary_name: "llama-stack-primary"
-  primary_url: "http://llama-stack:8321/v1"
   primary_model_env: "PRIMARY_MODEL"
   primary_model_default: "meta-llama/Llama-3.1-8B-Instruct"
