@@ -29,7 +29,7 @@ load_dotenv()
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-ENVOY_URL = os.environ.get("ENVOY_URL", "http://localhost:8080")
+ENVOY_URL = os.environ.get("ROUTER_URL", os.environ.get("ENVOY_URL", "http://localhost:8000"))
 COLLECTOR_URL = os.environ.get("COLLECTOR_URL", "http://localhost:8001")
 PRIMARY_MODEL = os.environ.get("PRIMARY_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
 
@@ -69,7 +69,7 @@ def send_via_llama_stack(
             request_id=request_id,
         )
 
-    client = LlamaStackClient(base_url=ENVOY_URL)
+    client = LlamaStackClient(base_url=ENVOY_URL)  # ENVOY_URL now points to model-router
 
     messages = []
     if system_prompt:
@@ -300,7 +300,7 @@ def main():
     use_llama_stack = USE_LLAMA_STACK_CLIENT and not args.no_llama_stack
 
     print(f"\nSending prompt via {'llama-stack' if use_llama_stack else 'OpenAI-compat'} "
-          f"→ Envoy → {args.model}")
+          f"→ model-router → {args.model}")
     print(f"Prompt: {args.prompt[:80]}{'...' if len(args.prompt) > 80 else ''}\n")
 
     rid = args.request_id or str(uuid.uuid4())

@@ -7,7 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Run as non-root for OpenShift compatibility
 RUN useradd -u 1001 -r -g 0 -s /sbin/nologin appuser && \
     chown -R 1001:0 /app
 USER 1001

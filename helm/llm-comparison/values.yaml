@@ -3,68 +3,26 @@
 #
 # Override any value with:
 #   helm install llm-comparison ./helm/llm-comparison -f my-values.yaml
-#   helm install llm-comparison ./helm/llm-comparison --set envoy.replicas=2
+#   helm install llm-comparison ./helm/llm-comparison --set modelRouter.replicas=2
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Global ────────────────────────────────────────────────────────────────────
 global:
-  # Prepended to all image names that don't have a registry specified.
-  # Set to your internal registry, e.g. quay.io/my-org
   imageRegistry: ""
   imagePullPolicy: Always
-  # Common labels applied to every resource
   labels: {}
-  # Common annotations applied to every resource
   annotations: {}
 
-# ── Namespace ─────────────────────────────────────────────────────────────────
-# Set to "" to deploy into the namespace selected by helm install -n <ns>
 namespaceOverride: ""
 
 # ── API Keys ──────────────────────────────────────────────────────────────────
 apiKeys:
-  # If set, the chart will NOT create a Secret — it will reference this
-  # existing secret for OPENAI_API_KEY, ANTHROPIC_API_KEY, TOGETHER_API_KEY.
   existingSecret: ""
-
-  # Plaintext values used when existingSecret is empty.
-  # These are base64-encoded automatically by Helm when creating the Secret.
-  # In production, use existingSecret + Vault/SealedSecrets instead.
   openai: ""
   anthropic: ""
   together: ""
 
-# ── Envoy Proxy ───────────────────────────────────────────────────────────────
-envoy:
-  enabled: true
-  image:
-    repository: envoyproxy/envoy
-    tag: v1.31-latest
-    # Override global.imageRegistry for this image (uses upstream Docker Hub)
-    registryOverride: ""
-  replicas: 1
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
-  service:
-    type: ClusterIP
-    port: 8080
-    adminPort: 9901
-  # Upstream connection timeout for LLM calls (seconds)
-  upstreamTimeoutSeconds: 120
-  # Upstream idle timeout (seconds)
-  idleTimeoutSeconds: 300
-  podAnnotations: {}
-  podLabels: {}
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-
-# ── Model Router ──────────────────────────────────────────────────────────────
+# ── Model Router (single entry point — no Envoy) ──────────────────────────────
 modelRouter:
   enabled: true
   image:
@@ -79,16 +37,23 @@ modelRouter:
       cpu: 500m
       memory: 512Mi
   logLevel: INFO
+  service:
+    type: ClusterIP
+    port: 8000
   podAnnotations: {}
   podLabels: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
 
-  # Secondary LLM configuration.
-  # Each entry maps a friendly name to a model_id registered in the llama-stack
-  # run.yaml.  llama-stack resolves model_id → provider → backend internally.
-  # providerId must match a provider_id entry in llamaStack.providers (run.yaml).
+  # Primary LLM — its response is returned to the client.
+  primary:
+    name: "llama-stack-primary"
+    # model_id is read from PRIMARY_MODEL env var at startup (set via llamaStack.primaryModel)
+    timeout: 120
+
+  # Secondary LLMs — called concurrently with the primary.
+  # Each model_id must be registered in the llama-stack run.yaml.
   llms:
     - name: "openai-gpt4o"
       modelId: "gpt-4o"
@@ -119,11 +84,6 @@ modelRouter:
       enabled: false
 
   collector:
-    # Re-call primary LLM from the router to capture its response for comparison.
-    # Set to false if you have a separate response-capture mechanism.
-    capturePrimary: true
-    primaryName: "llama-stack-primary"
-    # Timeout for sending results to the Collector (seconds)
     timeout: 5
 
 # ── Collector ─────────────────────────────────────────────────────────────────
@@ -141,7 +101,6 @@ collector:
       cpu: 500m
       memory: 256Mi
   logLevel: INFO
-  # How long to retain comparison records in Redis (seconds). Default: 24h.
   recordTtlSeconds: 86400
   podAnnotations: {}
   podLabels: {}
@@ -165,7 +124,6 @@ redis:
       memory: 256Mi
   persistence:
     enabled: true
-    # storageClassName: ""  # Leave empty to use the cluster default
     size: 1Gi
   podAnnotations: {}
   podLabels: {}
@@ -173,14 +131,11 @@ redis:
   tolerations: []
   affinity: {}
 
-# ── llama-stack (Primary LLM gateway) ────────────────────────────────────────
+# ── llama-stack ────────────────────────────────────────────────────────────────
 llamaStack:
   enabled: true
-  # Use the distribution image matching your backend provider:
-  #   llamastack/distribution-ollama:latest   (Ollama)
-  #   llamastack/distribution-remote-vllm:latest  (vLLM)
   image:
-    repository: llamastack/distribution-ollama
+    repository: llm-comparison-llama-stack
     tag: latest
     registryOverride: ""
   replicas: 1
@@ -191,56 +146,38 @@ llamaStack:
     limits:
       cpu: 2000m
       memory: 4Gi
-  # Model to serve as the primary LLM
   primaryModel: "meta-llama/Llama-3.1-8B-Instruct"
-  # provider_model_id passed to the self-hosted backend (e.g. Ollama tag name)
   primaryModelId: "llama3.1:8b"
-  # Backend provider: ollama | vllm
   provider: ollama
-  # URL of the backend inference server
   backendUrl: "http://ollama:11434"
   persistence:
     enabled: true
     size: 10Gi
-    # storageClassName: ""
   podAnnotations: {}
   podLabels: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
-  # For GPU-accelerated nodes on OpenShift
   gpuResources:
     enabled: false
-    # nvidia.com/gpu: "1"
     limits: {}
 
 # ── OpenShift Routes ──────────────────────────────────────────────────────────
 routes:
-  # Set to false on vanilla Kubernetes (use ingress instead)
   enabled: true
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
-  # Explicitly set hostnames, or leave empty to let OpenShift auto-generate them.
-  envoy:
+  modelRouter:
     host: ""
-    # e.g. llm-comparison.apps.your-cluster.example.com
   collector:
     host: ""
-  envoyAdmin:
-    host: ""
-    # Disable the admin route in production
-    enabled: true
 
 # ── Kubernetes Ingress (non-OpenShift) ────────────────────────────────────────
 ingress:
   enabled: false
   className: ""
   annotations: {}
-  # - host: llm-comparison.example.com
-  #   paths:
-  #     - path: /
-  #       pathType: Prefix
   hosts: []
   tls: []
 

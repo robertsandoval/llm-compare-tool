@@ -4,7 +4,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "llm-comparison.envoyName" $ }}-ingress
+  name: {{ include "llm-comparison.modelRouterName" $ }}-ingress
   namespace: {{ include "llm-comparison.namespace" $ }}
   labels:
     {{- include "llm-comparison.labels" $ | nindent 4 }}
@@ -29,7 +29,7 @@ spec:
         pathType: {{ .pathType }}
         backend:
           service:
-            name: {{ include "llm-comparison.envoyName" $ }}
+            name: {{ include "llm-comparison.modelRouterName" $ }}
             port:
               name: http
       {{- end }}

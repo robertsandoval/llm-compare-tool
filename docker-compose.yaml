@@ -1,10 +1,9 @@
 version: "3.9"
 
 # LLM Comparison Tool — Local Development
-# Prerequisites: Docker + Docker Compose, .env file (copy from .env.example)
+# No Envoy required. The model-router is the single entry point.
 
 services:
-  # ── Redis ────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     ports:
@@ -15,7 +14,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── Collector ─────────────────────────────────────────────────────────────────
   collector:
     build: ./collector
     ports:
@@ -33,32 +31,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Model Router ──────────────────────────────────────────────────────────────
-  model-router:
-    build: ./model-router
-    ports:
-      - "8000:8000"
-    environment:
-      - COLLECTOR_URL=http://collector:8001
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - TOGETHER_API_KEY=${TOGETHER_API_KEY:-}
-      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
-      - PRIMARY_MODEL=${PRIMARY_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
-    volumes:
-      - ./model-router/config.yaml:/app/config.yaml:ro
-    depends_on:
-      collector:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ── llama-stack (Primary LLM gateway) ─────────────────────────────────────────
-  # Uses Ollama as the default backend for local dev. Switch to vllm for GPU.
   llama-stack:
     image: llamastack/distribution-ollama:latest
     ports:
@@ -67,6 +39,9 @@ services:
       - LLAMA_STACK_PORT=8321
       - INFERENCE_MODEL=${PRIMARY_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
       - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY:-}
     volumes:
       - llama-stack-data:/root/.llama
     healthcheck:
@@ -76,19 +51,24 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── Envoy Proxy ────────────────────────────────────────────────────────────────
-  envoy:
-    build: ./envoy
+  # Model router is the single API entry point — no Envoy needed.
+  # Primary and secondary LLMs are called concurrently from here.
+  model-router:
+    build: ./model-router
     ports:
-      - "8080:8080"   # API gateway
-      - "9901:9901"   # Envoy admin
+      - "8000:8000"
+    environment:
+      - PRIMARY_MODEL=${PRIMARY_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./model-router/config.yaml:/app/config.yaml:ro
     depends_on:
+      collector:
+        condition: service_healthy
       llama-stack:
         condition: service_healthy
-      model-router:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9901/ready"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 5

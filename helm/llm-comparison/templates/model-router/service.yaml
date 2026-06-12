@@ -8,13 +8,13 @@ metadata:
     {{- include "llm-comparison.labels" . | nindent 4 }}
     app.kubernetes.io/component: router
 spec:
-  type: ClusterIP
+  type: {{ .Values.modelRouter.service.type }}
   selector:
     {{- include "llm-comparison.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: router
   ports:
   - name: http
-    port: 8000
+    port: {{ .Values.modelRouter.service.port }}
     targetPort: 8000
     protocol: TCP
 {{- end }}

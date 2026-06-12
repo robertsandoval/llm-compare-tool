@@ -1,23 +1,18 @@
-# OpenShift Routes — expose services externally via OpenShift HAProxy router.
-# These replace Kubernetes Ingress objects.
-#
-# After applying, get the hostnames with: oc get routes -n llm-comparison
+# OpenShift Routes — model-router is now the single external entry point.
 
 ---
-# Envoy proxy — main API gateway for client requests
+# Model Router — main API gateway (replaces Envoy)
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: envoy
+  name: model-router
   namespace: llm-comparison
   labels:
-    app: envoy
+    app: model-router
 spec:
-  # Optionally set a custom hostname:
-  # host: llm-comparison.apps.your-cluster.example.com
   to:
     kind: Service
-    name: envoy
+    name: model-router
     weight: 100
   port:
     targetPort: http
@@ -27,7 +22,7 @@ spec:
   wildcardPolicy: None
 
 ---
-# Collector API — for querying comparison results externally
+# Collector API — for querying comparison results
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -42,28 +37,6 @@ spec:
     weight: 100
   port:
     targetPort: http
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
-  wildcardPolicy: None
-
----
-# Envoy admin — for observability (restrict access in production)
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: envoy-admin
-  namespace: llm-comparison
-  labels:
-    app: envoy
-    component: admin
-spec:
-  to:
-    kind: Service
-    name: envoy
-    weight: 100
-  port:
-    targetPort: admin
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect

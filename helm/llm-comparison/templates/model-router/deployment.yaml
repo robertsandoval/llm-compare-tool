@@ -45,12 +45,10 @@ spec:
           containerPort: 8000
           protocol: TCP
         env:
-        - name: COLLECTOR_URL
-          value: {{ include "llm-comparison.collectorUrl" . | quote }}
-        - name: LOG_LEVEL
-          value: {{ .Values.modelRouter.logLevel | quote }}
         - name: PRIMARY_MODEL
           value: {{ .Values.llamaStack.primaryModel | quote }}
+        - name: LOG_LEVEL
+          value: {{ .Values.modelRouter.logLevel | quote }}
         - name: MODEL_ROUTER_CONFIG_PATH
           value: "/app/config.yaml"
         volumeMounts:

@@ -1,11 +1,17 @@
-# llama-stack server connection (shared by all secondary LLM calls)
+# llama-stack server (shared by all LLMs — primary and secondaries)
 llama_stack:
   url: "http://llama-stack:8321"
 
-llms:
-  # Each entry maps a friendly name to a model_id registered in llama-stack's run.yaml.
-  # llama-stack routes each model_id to the correct backend provider.
+# Primary LLM — its response is returned to the client
+primary:
+  name: "llama-stack-primary"
+  # Reads from PRIMARY_MODEL env var at startup, falls back to model_id below
+  model_id_env: "PRIMARY_MODEL"
+  model_id: "meta-llama/Llama-3.1-8B-Instruct"
+  timeout: 120
 
+# Secondary LLMs — called concurrently with the primary, results go to collector
+llms:
   - name: "openai-gpt4o"
     model_id: "gpt-4o"
     timeout: 60
@@ -29,7 +35,3 @@ llms:
 collector:
   url: "http://collector:8001"
   timeout: 5
-  capture_primary: true
-  primary_name: "llama-stack-primary"
-  primary_model_env: "PRIMARY_MODEL"
-  primary_model_default: "meta-llama/Llama-3.1-8B-Instruct"

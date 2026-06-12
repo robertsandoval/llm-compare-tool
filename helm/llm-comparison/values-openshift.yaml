@@ -12,33 +12,18 @@ global:
   imageRegistry: "quay.io/your-org"
   imagePullPolicy: Always
 
-# Use OpenShift Routes (not Kubernetes Ingress)
 routes:
   enabled: true
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
-  # Optionally pin hostnames — leave blank for auto-generated *.apps.<cluster>
-  envoy:
-    host: ""
+  modelRouter:
+    host: ""   # leave blank for auto-generated *.apps.<cluster>
   collector:
     host: ""
-  envoyAdmin:
-    enabled: false   # Disable admin route exposure in production
 
 ingress:
   enabled: false
-
-# Scale for production
-envoy:
-  replicas: 2
-  resources:
-    requests:
-      cpu: 200m
-      memory: 256Mi
-    limits:
-      cpu: 1000m
-      memory: 512Mi
 
 modelRouter:
   replicas: 2
@@ -66,7 +51,7 @@ modelRouter:
 
 collector:
   replicas: 2
-  recordTtlSeconds: 172800   # 48 hours
+  recordTtlSeconds: 172800
   resources:
     requests:
       cpu: 200m
@@ -79,15 +64,14 @@ redis:
   persistence:
     enabled: true
     size: 5Gi
-    # storageClassName: gp3-csi   # Use your cluster's storage class
+    # storageClassName: gp3-csi
 
-# llama-stack with vLLM backend for GPU-accelerated OpenShift nodes
 llamaStack:
   image:
     repository: llm-comparison-llama-stack
     tag: latest
   provider: vllm
-  backendUrl: "http://vllm:8000"   # Point to your vLLM service
+  backendUrl: "http://vllm:8000"
   primaryModel: "meta-llama/Llama-3.1-8B-Instruct"
   primaryModelId: "meta-llama/Llama-3.1-8B-Instruct"
   persistence:
@@ -102,12 +86,7 @@ llamaStack:
       cpu: "4000m"
       memory: "8Gi"
   gpuResources:
-    enabled: false   # Set true and configure limits.nvidia.com/gpu if using GPU nodes
+    enabled: false
     limits: {}
-  # Pin to GPU-enabled node pool
   nodeSelector: {}
-    # node-role.kubernetes.io/gpu: "true"
   tolerations: []
-    # - key: nvidia.com/gpu
-    #   operator: Exists
-    #   effect: NoSchedule

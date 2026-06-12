@@ -9,28 +9,25 @@ Namespace: {{ $ns }}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   COMPONENTS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{{- if .Values.envoy.enabled }}
-  ✓  Envoy Proxy        {{ include "llm-comparison.envoyName" . }}:8080
-{{- end }}
 {{- if .Values.modelRouter.enabled }}
-  ✓  Model Router       {{ include "llm-comparison.modelRouterName" . }}:8000
+  ✓  Model Router (entry point)  {{ include "llm-comparison.modelRouterName" . }}:8000
+     Primary model: {{ .Values.llamaStack.primaryModel }}
 {{- end }}
 {{- if .Values.collector.enabled }}
-  ✓  Collector          {{ include "llm-comparison.collectorName" . }}:8001
+  ✓  Collector                   {{ include "llm-comparison.collectorName" . }}:8001
 {{- end }}
 {{- if .Values.redis.enabled }}
-  ✓  Redis              {{ include "llm-comparison.redisName" . }}:6379
+  ✓  Redis                       {{ include "llm-comparison.redisName" . }}:6379
 {{- end }}
 {{- if .Values.llamaStack.enabled }}
-  ✓  llama-stack        {{ include "llm-comparison.llamaStackName" . }}:8321
-     Primary model:     {{ .Values.llamaStack.primaryModel }}
+  ✓  llama-stack                 {{ include "llm-comparison.llamaStackName" . }}:8321
 {{- end }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  SECONDARY LLMs CONFIGURED
+  SECONDARY LLMs  (concurrent fan-out)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {{- range .Values.modelRouter.llms }}
-  {{ if .enabled }}✓{{ else }}✗{{ end }}  {{ .name }} → {{ .model }}
+  {{ if .enabled }}✓{{ else }}✗{{ end }}  {{ .name }} → {{ .modelId }}
 {{- end }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -45,25 +42,26 @@ Namespace: {{ $ns }}
   kubectl get ingress -n {{ $ns }}
 
 {{- else }}
-  # Forward Envoy port locally
-  kubectl port-forward -n {{ $ns }} svc/{{ include "llm-comparison.envoyName" . }} 8080:8080 &
+  # Forward model-router port locally
+  kubectl port-forward -n {{ $ns }} svc/{{ include "llm-comparison.modelRouterName" . }} 8000:8000 &
 
   # Forward Collector port locally
   kubectl port-forward -n {{ $ns }} svc/{{ include "llm-comparison.collectorName" . }} 8001:8001 &
 {{- end }}
 
-  # Send a prompt (from the client/ directory)
-  ENVOY_URL=<envoy-url> COLLECTOR_URL=<collector-url> \
-    python compare_client.py --prompt "Explain transformers in ML"
+  # Send a prompt (streaming)
+  curl -N <model-router-url>/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{"model":"{{ .Values.llamaStack.primaryModel }}","messages":[{"role":"user","content":"Hello"}],"stream":true}'
 
-  # List recent comparisons
+  # Or use the Python client
+  ROUTER_URL=<model-router-url> python client/compare_client.py \
+    --prompt "Explain quantum entanglement"
+
+  # View comparison results
   curl <collector-url>/comparisons
-
-  # View Envoy admin dashboard
-  kubectl port-forward -n {{ $ns }} svc/{{ include "llm-comparison.envoyName" . }} 9901:9901
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {{- if not .Values.apiKeys.existingSecret }}
-  ⚠  API keys were provided via values. For production use
-     existingSecret pointing to a pre-created Secret.
+  ⚠  API keys provided via values. Use existingSecret in production.
 {{- end }}

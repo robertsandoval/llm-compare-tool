@@ -23,7 +23,6 @@ spec:
         fsGroup: 0
       containers:
       - name: model-router
-        # Replace with your image registry path after building and pushing
         image: quay.io/your-org/llm-comparison-model-router:latest
         imagePullPolicy: Always
         ports:
@@ -31,39 +30,16 @@ spec:
           containerPort: 8000
           protocol: TCP
         env:
-        - name: COLLECTOR_URL
-          valueFrom:
-            configMapKeyRef:
-              name: llm-comparison-config
-              key: COLLECTOR_URL
-        - name: LOG_LEVEL
-          valueFrom:
-            configMapKeyRef:
-              name: llm-comparison-config
-              key: LOG_LEVEL
         - name: PRIMARY_MODEL
           valueFrom:
             configMapKeyRef:
               name: llm-comparison-config
               key: PRIMARY_MODEL
-        - name: OPENAI_API_KEY
+        - name: LOG_LEVEL
           valueFrom:
-            secretKeyRef:
-              name: llm-api-keys
-              key: OPENAI_API_KEY
-              optional: true
-        - name: ANTHROPIC_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: llm-api-keys
-              key: ANTHROPIC_API_KEY
-              optional: true
-        - name: TOGETHER_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: llm-api-keys
-              key: TOGETHER_API_KEY
-              optional: true
+            configMapKeyRef:
+              name: llm-comparison-config
+              key: LOG_LEVEL
         volumeMounts:
         - name: model-router-config
           mountPath: /app/config.yaml
