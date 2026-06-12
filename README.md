@@ -1,148 +1,194 @@
 # LLM Comparison Tool
 
-A platform for simultaneously comparing chat responses from multiple Large Language Models using **Envoy traffic mirroring** and **llama-stack** for API standardization.
+A platform for simultaneously comparing chat responses from multiple Large Language Models.
+Sends one request, gets back a side-by-side comparison from every configured LLM — all calls happen concurrently.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         Client (Python)                              │
-│              llama-stack-client / OpenAI-compatible SDK              │
-└───────────────────────────┬─────────────────────────────────────────┘
-                            │  POST /v1/chat/completions
-                            │  model: "primary-model"
-                            ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Envoy Proxy (:8080)                           │
-│                      Traffic Mirroring                               │
-└───────────┬────────────────────────────────┬────────────────────────┘
-            │ Primary (100%)                 │ Mirror (100%, fire-and-forget)
-            ▼                                ▼
-┌────────────────────────┐      ┌────────────────────────────────────┐
-│   llama-stack Server   │      │      Model Router Service           │
-│   (Primary LLM 1)      │      │      (Python / FastAPI)             │
-│   e.g. Llama-3.1-8B    │      │                                     │
-│                        │      │  Receives mirrored request and      │
-│   Returns response to  │      │  fans out to multiple LLMs with     │
-│   client via Envoy     │      │  substituted model names:           │
-└────────────────────────┘      │                                     │
-                                │  ┌──────────────────────────────┐  │
-                                │  │ LLM 2: GPT-4o (OpenAI)       │  │
-                                │  │ LLM 3: claude-3-5-sonnet     │  │
-                                │  │ LLM 4: llama3.1:70b (Ollama) │  │
-                                │  │ LLM N: ...                   │  │
-                                │  └──────────────────────────────┘  │
-                                │              │                      │
-                                └──────────────┼──────────────────────┘
-                                               │ All responses stored
-                                               ▼
-                                ┌────────────────────────────────────┐
-                                │       Collector Service             │
-                                │       (Python / FastAPI)            │
-                                │       Backed by Redis               │
-                                │                                     │
-                                │  GET /comparisons/{request_id}      │
-                                │  GET /comparisons/latest            │
-                                └────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                    Client (Python / any OpenAI-compatible SDK)        │
+│            POST /v1/chat/completions  or  /v1/inference/chat_completion│
+└───────────────────────────────┬──────────────────────────────────────┘
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      Model Router  (:8000)                            │
+│                    Single entry point — no proxy required             │
+│                                                                        │
+│  On every request:                                                     │
+│  1. Fire secondary LLM tasks immediately  ──────────────────────┐     │
+│  2. Call primary LLM (streaming or non-streaming)               │     │
+│  3. Return primary response to client                           │     │
+│  4. Ship primary response to Collector                          │     │
+│                                                                 │     │
+│  Steps 1 and 2 start at the SAME instant.                       │     │
+│  The client never waits for secondary calls.                    │     │
+└────────────────┬────────────────────────────────────────────────┘     │
+                 │  all calls via /v1/inference/chat_completion          │
+                 ▼                                                        │
+┌────────────────────────────────────┐                                   │
+│         llama-stack  (:8321)       │ ◀─────────────────────────────────┘
+│   Single server, all providers     │  (secondary calls also go here)
+│                                    │
+│  provider: ollama  → primary model │
+│  provider: openai  → gpt-4o        │
+│  provider: anthropic → claude      │
+│  provider: together → llama-70b    │
+└────────────────┬───────────────────┘
+                 │ routes to correct backend
+        ┌────────┴────────┐
+        ▼                 ▼
+   Ollama/vLLM       Cloud APIs
+   (self-hosted)  (OpenAI, Anthropic…)
+                                   │
+               all responses ──────▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                     Collector  (:8001)                                │
+│               FastAPI + Redis  — keyed by x-request-id               │
+│                                                                        │
+│  GET /comparisons/{request_id}   — side-by-side results               │
+│  GET /comparisons                — list recent comparisons            │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## How Traffic Mirroring Works
+## How it works
 
-1. The Python client sends a single `POST /v1/chat/completions` request to **Envoy** using the primary model name (e.g., `meta-llama/Llama-3.1-8B-Instruct`).
-2. Envoy **forwards** the request to the primary **llama-stack** server (LLM 1) and simultaneously **mirrors** an identical copy to the **Model Router**.
-3. The client receives the response from LLM 1. The mirror is fire-and-forget from Envoy's perspective.
-4. The **Model Router** receives the mirrored request, rewrites the `model` field to each configured secondary LLM's model name, and calls all of them **concurrently** using `asyncio`.
-5. Each LLM response — plus the primary — is stored in the **Collector** service (Redis-backed) keyed by a request correlation ID.
-6. Use the **Collector API** or the provided client script to fetch and display a side-by-side comparison.
+1. The client sends a single `POST /v1/chat/completions` to the **Model Router** with the primary model name.
+2. The router **immediately fires background tasks** for every enabled secondary LLM — they start running concurrently before the primary even responds.
+3. The router calls the **primary LLM** through llama-stack. If streaming is requested, tokens are forwarded to the client as they arrive (low latency to first token).
+4. The client receives only the primary response. Secondaries are invisible to the client and never block it.
+5. All responses — primary and secondary — are shipped to the **Collector** and stored in Redis under the same `request_id`.
+6. Query `GET /comparisons/{request_id}` to retrieve the full side-by-side comparison.
+
+## Key design points
+
+- **No Envoy required** — concurrent fan-out is handled in Python via `asyncio.create_task()`
+- **All LLMs go through llama-stack** — single unified inference API, no per-provider code in the router
+- **Primary called exactly once** — the exact response the client receives is what gets stored in the collector
+- **Streaming supported** — `stream: true` works on both `/v1/chat/completions` and `/v1/inference/chat_completion`
+- **Per-LLM failure isolation** — one LLM timing out does not affect the primary response or other secondaries
 
 ## Components
 
-| Component | Language | Description |
+| Component | Port | Description |
 |---|---|---|
-| `envoy/` | YAML | Envoy proxy config with traffic mirroring |
-| `model-router/` | Python (FastAPI) | Receives mirrored requests, substitutes model names, fans out |
-| `collector/` | Python (FastAPI) | Stores and serves LLM response comparisons (Redis-backed) |
-| `client/` | Python | llama-stack-based client + comparison viewer |
-| `openshift/` | YAML | OpenShift 4.21 deployment manifests |
+| `model-router/` | 8000 | Entry point. Concurrent fan-out to all LLMs via llama-stack. |
+| `llama-stack/` | 8321 | Unified inference server. Fronts every LLM (primary + secondaries). |
+| `collector/` | 8001 | Stores and serves comparison results (FastAPI + Redis). |
+| `client/` | — | Python CLI for sending prompts and viewing comparisons. |
+| `openshift/` | — | OpenShift 4.21 deployment manifests. |
+| `helm/llm-comparison/` | — | Helm chart for full deployment. |
 
 ## Quick Start (Local with Docker Compose)
 
 ### Prerequisites
 - Docker + Docker Compose
-- At least one LLM backend (Ollama for local, or API keys for cloud providers)
+- Ollama running locally (or API keys for cloud providers)
 
 ### Setup
 
 ```bash
-# Copy and fill in your environment variables
 cp .env.example .env
+# Fill in OPENAI_API_KEY and/or ANTHROPIC_API_KEY
 
-# Start all services
 docker compose up -d
-
-# Wait for services to be ready
 docker compose ps
 ```
 
-### Run a comparison
+### Send a prompt and compare
 
 ```bash
 cd client
 pip install -r requirements.txt
 
-# Send a prompt and compare results
-python compare_client.py --prompt "Explain quantum entanglement in simple terms"
+# Non-streaming
+python compare_client.py --prompt "Explain transformers in machine learning"
 
-# View latest comparison results
-python compare_client.py --view-latest
+# View results for a specific request
+python compare_client.py --view <request_id>
+
+# List recent comparisons
+python compare_client.py --list
+
+# Streaming (raw curl)
+curl -N http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"meta-llama/Llama-3.1-8B-Instruct","messages":[{"role":"user","content":"Hello"}],"stream":true}'
+```
+
+### Introspect the system
+
+```bash
+# What models are configured?
+curl http://localhost:8000/models | python3 -m json.tool
+
+# What models does llama-stack know about?
+curl http://localhost:8321/v1/models | python3 -m json.tool
+
+# What LLM providers are registered?
+curl http://localhost:8321/v1/providers | python3 -m json.tool
+
+# Collector health
+curl http://localhost:8001/health
 ```
 
 ## Configuration
 
-### Model Router (`model-router/config.yaml`)
+### Add or remove secondary LLMs
 
-Add or remove LLMs in the model router configuration:
+Edit `model-router/config.yaml`:
 
 ```yaml
 llms:
   - name: "openai-gpt4o"
-    base_url: "https://api.openai.com/v1"
-    model: "gpt-4o"
-    api_key_env: "OPENAI_API_KEY"
-    provider: "openai"
+    model_id: "gpt-4o"       # must match a model registered in llama-stack's run.yaml
+    timeout: 60
+    enabled: true
 
-  - name: "anthropic-claude"
-    base_url: "https://api.anthropic.com/v1"
-    model: "claude-3-5-sonnet-20241022"
-    api_key_env: "ANTHROPIC_API_KEY"
-    provider: "anthropic"
-
-  - name: "ollama-llama70b"
-    base_url: "http://ollama:11434/v1"
-    model: "llama3.1:70b"
-    api_key_env: ""
-    provider: "openai_compatible"
+  - name: "anthropic-claude-sonnet"
+    model_id: "claude-3-5-sonnet-20241022"
+    timeout: 60
+    enabled: true
 ```
 
-### Primary LLM (llama-stack `run.yaml`)
+And add the corresponding model entry to `openshift/llama-stack/run.yaml` (or `helm/llm-comparison/values.yaml` for Helm-managed deployments):
 
-Configure the llama-stack server provider in `openshift/llama-stack/run.yaml` or set `LLAMA_STACK_CONFIG` in your environment.
+```yaml
+models:
+  - model_id: "gpt-4o"
+    provider_id: openai
+    provider_model_id: "gpt-4o"
+    model_type: llm
+```
 
-## Helm Chart (Recommended)
+### Environment Variables
 
-The chart lives at `helm/llm-comparison/` and supports both OpenShift (Routes) and vanilla Kubernetes (Ingress).
+| Variable | Default | Description |
+|---|---|---|
+| `PRIMARY_MODEL` | `meta-llama/Llama-3.1-8B-Instruct` | Primary model name |
+| `OPENAI_API_KEY` | — | OpenAI API key (used by llama-stack) |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key (used by llama-stack) |
+| `TOGETHER_API_KEY` | — | Together AI API key (used by llama-stack) |
+| `OLLAMA_URL` | `http://ollama:11434` | Ollama backend URL |
+| `COLLECTOR_URL` | `http://collector:8001` | Collector service URL |
+| `REDIS_URL` | `redis://redis:6379` | Redis URL |
+| `LOG_LEVEL` | `INFO` | Log level for Python services |
+| `RECORD_TTL_SECONDS` | `86400` | How long to keep results in Redis |
 
-### Install on OpenShift 4.21
+> **Note:** API keys are injected into the **llama-stack** pod, not the model-router. The router has no credentials — all provider authentication is handled by llama-stack.
+
+## Helm Chart (Recommended for OpenShift)
 
 ```bash
-# Dry-run to preview all rendered manifests
+# Dry-run
 helm template llm-comparison helm/llm-comparison \
   -n llm-comparison \
   -f helm/llm-comparison/values-openshift.yaml \
   --set apiKeys.openai=$OPENAI_API_KEY \
   --set apiKeys.anthropic=$ANTHROPIC_API_KEY
 
-# Install (creates namespace automatically)
+# Install
 helm install llm-comparison helm/llm-comparison \
   -n llm-comparison --create-namespace \
   -f helm/llm-comparison/values-openshift.yaml \
@@ -154,32 +200,19 @@ oc rollout status deployment -n llm-comparison
 oc get routes -n llm-comparison
 ```
 
-### Install on Vanilla Kubernetes
+### Common Helm operations
 
 ```bash
-helm install llm-comparison helm/llm-comparison \
-  -n llm-comparison --create-namespace \
-  --set routes.enabled=false \
-  --set ingress.enabled=true \
-  --set "ingress.hosts[0].host=llm-comparison.example.com" \
-  --set "ingress.hosts[0].paths[0].path=/" \
-  --set "ingress.hosts[0].paths[0].pathType=Prefix" \
-  --set apiKeys.openai=$OPENAI_API_KEY \
-  --set apiKeys.anthropic=$ANTHROPIC_API_KEY
-```
-
-### Common Helm Operations
-
-```bash
-# Upgrade with new values
-helm upgrade llm-comparison helm/llm-comparison -n llm-comparison \
-  -f helm/llm-comparison/values-openshift.yaml
-
-# Enable an additional LLM (Together AI)
+# Enable Together AI as an additional secondary
 helm upgrade llm-comparison helm/llm-comparison -n llm-comparison \
   --reuse-values \
   --set "modelRouter.llms[2].enabled=true" \
   --set apiKeys.together=$TOGETHER_API_KEY
+
+# Scale the model router
+helm upgrade llm-comparison helm/llm-comparison -n llm-comparison \
+  --reuse-values \
+  --set modelRouter.replicas=3
 
 # Lint the chart
 helm lint helm/llm-comparison/
@@ -188,87 +221,45 @@ helm lint helm/llm-comparison/
 helm uninstall llm-comparison -n llm-comparison
 ```
 
-### Chart Values Reference
-
-| Key | Default | Description |
-|---|---|---|
-| `global.imageRegistry` | `""` | Prefix for all image refs (set to your mirror registry) |
-| `apiKeys.existingSecret` | `""` | Use a pre-created Secret instead of chart-managed one |
-| `apiKeys.openai` | `""` | OpenAI API key |
-| `apiKeys.anthropic` | `""` | Anthropic API key |
-| `modelRouter.llms` | see values.yaml | List of secondary LLMs with model name substitutions |
-| `llamaStack.primaryModel` | `meta-llama/Llama-3.1-8B-Instruct` | Primary model name |
-| `llamaStack.provider` | `ollama` | Backend: `ollama` or `vllm` |
-| `llamaStack.backendUrl` | `http://ollama:11434` | URL of the inference backend |
-| `redis.persistence.size` | `1Gi` | Redis PVC size |
-| `llamaStack.persistence.size` | `10Gi` | llama-stack PVC size |
-| `routes.enabled` | `true` | Create OpenShift Routes |
-| `ingress.enabled` | `false` | Create Kubernetes Ingress |
-
 ## OpenShift Deployment (Raw Manifests)
 
 ```bash
-# Create the namespace
 oc apply -f openshift/namespace.yaml
+oc apply -f openshift/configmap.yaml
 
-# Create secrets (fill in API keys first)
+# Fill in API keys first
 cp openshift/secret.yaml.example openshift/secret.yaml
-# Edit openshift/secret.yaml with your API keys
 oc apply -f openshift/secret.yaml
 
-# Create ConfigMaps
-oc apply -f openshift/configmap.yaml
-oc apply -f openshift/envoy/configmap.yaml
-
-# Deploy all services
 oc apply -f openshift/redis/
 oc apply -f openshift/llama-stack/
 oc apply -f openshift/collector/
 oc apply -f openshift/model-router/
-oc apply -f openshift/envoy/
 oc apply -f openshift/routes.yaml
 
-# Verify deployments
 oc get pods -n llm-comparison
 oc get routes -n llm-comparison
 ```
 
-## API Reference
-
-### Collector Service
+## Collector API Reference
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/comparisons/{request_id}` | GET | Fetch all LLM responses for a request ID |
-| `/comparisons/latest` | GET | List most recent comparisons |
-| `/comparisons/latest?limit=10` | GET | List N most recent comparisons |
-| `/health` | GET | Health check |
+| `/comparisons/{request_id}` | GET | All LLM responses for a request |
+| `/comparisons` | GET | List recent comparisons (`?limit=20&offset=0`) |
+| `/comparisons/{request_id}` | DELETE | Delete a single record |
+| `/comparisons` | DELETE | Clear all records |
+| `/health` | GET | Health check (includes Redis connectivity) |
 
-### Model Router
+## Model Router API Reference
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/v1/chat/completions` | POST | Receives mirrored requests (OpenAI format) |
+| `/v1/chat/completions` | POST | OpenAI-compatible inference (streaming supported) |
+| `/v1/inference/chat_completion` | POST | llama-stack native inference (streaming supported) |
 | `/health` | GET | Health check |
-| `/models` | GET | List configured secondary LLMs |
-
-## Environment Variables
-
-| Variable | Description |
-|---|---|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `TOGETHER_API_KEY` | Together AI API key |
-| `OLLAMA_URL` | Ollama server URL (default: `http://ollama:11434`) |
-| `COLLECTOR_URL` | Collector service URL (default: `http://collector:8001`) |
-| `REDIS_URL` | Redis URL (default: `redis://redis:6379`) |
-| `PRIMARY_LLM_URL` | Primary llama-stack server URL |
-| `PRIMARY_MODEL` | Primary model name for the client |
+| `/models` | GET | Lists primary + all configured secondary LLMs |
 
 ## Target Platform
 
-Designed and tested for **OpenShift 4.21**. Manifests use:
-- `apps/v1` Deployments
-- OpenShift `Route` resources (no Ingress required)
-- Non-root container security contexts (compatible with OpenShift SCCs)
-- ConfigMaps for Envoy and application configuration
+Designed for **OpenShift 4.21**. All containers run as non-root (UID 1001) and drop all Linux capabilities for SCC compatibility.
