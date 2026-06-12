@@ -6,24 +6,18 @@
 #
 # Required environment variables (inject via Secret in OpenShift):
 #   OPENAI_API_KEY, ANTHROPIC_API_KEY, TOGETHER_API_KEY
-#   OLLAMA_URL (or VLLM_URL for GPU nodes)
+#   VLLM_URL (URL of the running vLLM instance)
 
 version: '2'
 image_name: llm-comparison-multi-provider
 
 providers:
   inference:
-  # ── Primary: self-hosted model (Ollama or vLLM) ────────────────────────────
-  - provider_id: ollama
-    provider_type: remote::ollama
+  # ── Primary: self-hosted vLLM ────────────────────────────────────────────────
+  - provider_id: vllm
+    provider_type: remote::vllm
     config:
-      url: ${env.OLLAMA_URL:http://ollama:11434}
-
-  # Switch to vLLM for GPU-accelerated OpenShift nodes:
-  # - provider_id: vllm
-  #   provider_type: remote::vllm
-  #   config:
-  #     url: ${env.VLLM_URL:http://vllm:8000}
+      url: ${env.VLLM_URL:http://vllm:8000}
 
   # ── Secondary: cloud providers ─────────────────────────────────────────────
   - provider_id: openai
@@ -59,10 +53,10 @@ metadata_store:
 # Each model_id here must match an entry in model-router/config.yaml.
 # Add or remove models freely — just keep both files in sync.
 models:
-# Primary self-hosted model
+# Primary self-hosted model (served by vLLM)
 - model_id: ${env.PRIMARY_MODEL:meta-llama/Llama-3.1-8B-Instruct}
-  provider_id: ollama
-  provider_model_id: ${env.OLLAMA_PRIMARY_MODEL_ID:llama3.1:8b}
+  provider_id: vllm
+  provider_model_id: ${env.PRIMARY_MODEL:meta-llama/Llama-3.1-8B-Instruct}
   model_type: llm
 
 # OpenAI

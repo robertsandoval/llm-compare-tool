@@ -169,17 +169,10 @@ image_name: llm-comparison-multi-provider
 
 providers:
   inference:
-{{- if eq .Values.llamaStack.provider "vllm" }}
   - provider_id: vllm
     provider_type: remote::vllm
     config:
       url: {{ .Values.llamaStack.backendUrl | quote }}
-{{- else }}
-  - provider_id: ollama
-    provider_type: remote::ollama
-    config:
-      url: {{ .Values.llamaStack.backendUrl | quote }}
-{{- end }}
   - provider_id: openai
     provider_type: remote::openai
     config:
@@ -209,7 +202,7 @@ metadata_store:
 
 models:
 - model_id: {{ .Values.llamaStack.primaryModel | quote }}
-  provider_id: {{ if eq .Values.llamaStack.provider "vllm" }}vllm{{ else }}ollama{{ end }}
+  provider_id: vllm
   provider_model_id: {{ .Values.llamaStack.primaryModelId | default .Values.llamaStack.primaryModel | quote }}
   model_type: llm
 {{- range .Values.modelRouter.llms }}

@@ -31,7 +31,7 @@ Sends one request, gets back a side-by-side comparison from every configured LLM
 │         llama-stack  (:8321)       │ ◀─────────────────────────────────┘
 │   Single server, all providers     │  (secondary calls also go here)
 │                                    │
-│  provider: ollama  → primary model │
+│  provider: vllm    → primary model │
 │  provider: openai  → gpt-4o        │
 │  provider: anthropic → claude      │
 │  provider: together → llama-70b    │
@@ -39,7 +39,7 @@ Sends one request, gets back a side-by-side comparison from every configured LLM
                  │ routes to correct backend
         ┌────────┴────────┐
         ▼                 ▼
-   Ollama/vLLM       Cloud APIs
+   vLLM              Cloud APIs
    (self-hosted)  (OpenAI, Anthropic…)
                                    │
                all responses ──────▼
@@ -80,21 +80,29 @@ Sends one request, gets back a side-by-side comparison from every configured LLM
 | `openshift/` | — | OpenShift 4.21 deployment manifests. |
 | `helm/llm-comparison/` | — | Helm chart for full deployment. |
 
-## Quick Start (Local with Docker Compose)
+## Quick Start (Local with podman-compose)
 
 ### Prerequisites
-- Docker + Docker Compose
-- Ollama running locally (or API keys for cloud providers)
+- Podman + podman-compose (`pip install podman-compose`)
+- A running vLLM instance **or** GPU available for the bundled vLLM service
+- API keys for any cloud providers you want to compare against
 
 ### Setup
 
 ```bash
 cp .env.example .env
 # Fill in OPENAI_API_KEY and/or ANTHROPIC_API_KEY
+# Set HUGGING_FACE_HUB_TOKEN if your model requires authentication
+# Adjust PRIMARY_MODEL to match the model loaded in your vLLM instance
 
-docker compose up -d
-docker compose ps
+podman-compose up -d
+podman-compose ps
 ```
+
+> **vLLM note:** The compose file includes a bundled `vllm` service. GPU passthrough
+> on Linux is enabled by uncommenting the `deploy.resources` block in `docker-compose.yaml`.
+> On macOS/Windows or when running vLLM externally, set `VLLM_URL` in `.env` and
+> remove/disable the `vllm` service.
 
 ### Send a prompt and compare
 
@@ -112,7 +120,7 @@ python compare_client.py --view <request_id>
 python compare_client.py --list
 
 # Streaming (raw curl)
-curl -N http://localhost:8000/v1/chat/completions \
+curl -N http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"meta-llama/Llama-3.1-8B-Instruct","messages":[{"role":"user","content":"Hello"}],"stream":true}'
 ```
@@ -121,7 +129,7 @@ curl -N http://localhost:8000/v1/chat/completions \
 
 ```bash
 # What models are configured?
-curl http://localhost:8000/models | python3 -m json.tool
+curl http://localhost:8080/models | python3 -m json.tool
 
 # What models does llama-stack know about?
 curl http://localhost:8321/v1/models | python3 -m json.tool
@@ -166,11 +174,12 @@ models:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PRIMARY_MODEL` | `meta-llama/Llama-3.1-8B-Instruct` | Primary model name |
+| `PRIMARY_MODEL` | `meta-llama/Llama-3.1-8B-Instruct` | Primary model name (must match what vLLM is serving) |
+| `VLLM_URL` | `http://vllm:8000` | vLLM backend URL |
+| `HUGGING_FACE_HUB_TOKEN` | — | HF token for gated models |
 | `OPENAI_API_KEY` | — | OpenAI API key (used by llama-stack) |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (used by llama-stack) |
 | `TOGETHER_API_KEY` | — | Together AI API key (used by llama-stack) |
-| `OLLAMA_URL` | `http://ollama:11434` | Ollama backend URL |
 | `COLLECTOR_URL` | `http://collector:8001` | Collector service URL |
 | `REDIS_URL` | `redis://redis:6379` | Redis URL |
 | `LOG_LEVEL` | `INFO` | Log level for Python services |
@@ -193,7 +202,8 @@ helm install llm-comparison helm/llm-comparison \
   -n llm-comparison --create-namespace \
   -f helm/llm-comparison/values-openshift.yaml \
   --set apiKeys.openai=$OPENAI_API_KEY \
-  --set apiKeys.anthropic=$ANTHROPIC_API_KEY
+  --set apiKeys.anthropic=$ANTHROPIC_API_KEY \
+  --set llamaStack.backendUrl=http://vllm:8000
 
 # Check rollout
 oc rollout status deployment -n llm-comparison
@@ -219,6 +229,26 @@ helm lint helm/llm-comparison/
 
 # Uninstall
 helm uninstall llm-comparison -n llm-comparison
+```
+
+## Building Container Images
+
+All container images use `Containerfile` (Podman default). Build with:
+
+```bash
+podman build -t quay.io/your-org/llm-comparison-model-router:latest \
+             -f model-router/Containerfile model-router/
+
+podman build -t quay.io/your-org/llm-comparison-llama-stack:latest \
+             -f llama-stack/Containerfile llama-stack/
+
+podman build -t quay.io/your-org/llm-comparison-collector:latest \
+             -f collector/Containerfile collector/
+
+# Push all images
+podman push quay.io/your-org/llm-comparison-model-router:latest
+podman push quay.io/your-org/llm-comparison-llama-stack:latest
+podman push quay.io/your-org/llm-comparison-collector:latest
 ```
 
 ## OpenShift Deployment (Raw Manifests)

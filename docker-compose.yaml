@@ -2,6 +2,9 @@ version: "3.9"
 
 # LLM Comparison Tool — Local Development
 # No Envoy required. The model-router is the single entry point.
+#
+# Run with:  podman-compose up -d
+# Build:     podman-compose build
 
 services:
   redis:
@@ -15,7 +18,9 @@ services:
       retries: 5
 
   collector:
-    build: ./collector
+    build:
+      context: ./collector
+      dockerfile: Containerfile
     ports:
       - "8001:8001"
     environment:
@@ -31,19 +36,56 @@ services:
       timeout: 5s
       retries: 5
 
+  # vLLM — self-hosted local LLM backend (requires GPU or CPU-fallback build).
+  # If you are running vLLM externally, remove this service and set
+  # VLLM_URL in your environment to point at your running instance.
+  vllm:
+    image: vllm/vllm-openai:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    command:
+      - "--model"
+      - "${PRIMARY_MODEL:-meta-llama/Llama-3.1-8B-Instruct}"
+      - "--port"
+      - "8000"
+    volumes:
+      - vllm-model-cache:/root/.cache/huggingface
+    # Uncomment for NVIDIA GPU passthrough (Linux hosts only):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
+
   llama-stack:
-    image: llamastack/distribution-ollama:latest
+    build:
+      context: ./llama-stack
+      dockerfile: Containerfile
     ports:
       - "8321:8321"
     environment:
       - LLAMA_STACK_PORT=8321
       - INFERENCE_MODEL=${PRIMARY_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
-      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - VLLM_URL=${VLLM_URL:-http://vllm:8000}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - TOGETHER_API_KEY=${TOGETHER_API_KEY:-}
     volumes:
       - llama-stack-data:/root/.llama
+      - ./llama-stack/run.yaml:/app/run.yaml:ro
+    depends_on:
+      vllm:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8321/health"]
       interval: 15s
@@ -54,9 +96,11 @@ services:
   # Model router is the single API entry point — no Envoy needed.
   # Primary and secondary LLMs are called concurrently from here.
   model-router:
-    build: ./model-router
+    build:
+      context: ./model-router
+      dockerfile: Containerfile
     ports:
-      - "8000:8000"
+      - "8080:8000"
     environment:
       - PRIMARY_MODEL=${PRIMARY_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -75,3 +119,4 @@ services:
 
 volumes:
   llama-stack-data:
+  vllm-model-cache:

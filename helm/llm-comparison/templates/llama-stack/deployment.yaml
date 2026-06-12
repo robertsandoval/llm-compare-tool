@@ -49,13 +49,8 @@ spec:
           value: "8321"
         - name: PRIMARY_MODEL
           value: {{ .Values.llamaStack.primaryModel | quote }}
-        {{- if eq .Values.llamaStack.provider "vllm" }}
         - name: VLLM_URL
           value: {{ .Values.llamaStack.backendUrl | quote }}
-        {{- else }}
-        - name: OLLAMA_URL
-          value: {{ .Values.llamaStack.backendUrl | quote }}
-        {{- end }}
         # Cloud provider API keys — all secondary LLMs are fronted by llama-stack
         # so it needs the credentials, not the model-router.
         - name: OPENAI_API_KEY

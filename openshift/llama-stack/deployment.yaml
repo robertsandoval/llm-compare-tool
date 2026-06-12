@@ -23,7 +23,7 @@ spec:
         fsGroup: 0
       containers:
       - name: llama-stack
-        # Multi-provider llama-stack distribution — built from llama-stack/Dockerfile.
+        # Multi-provider llama-stack distribution — built from llama-stack/Containerfile.
         # Fronts ALL LLMs (primary + secondary) through a single /v1/inference endpoint.
         image: quay.io/your-org/llm-comparison-llama-stack:latest
         imagePullPolicy: Always
@@ -39,11 +39,9 @@ spec:
             configMapKeyRef:
               name: llm-comparison-config
               key: PRIMARY_MODEL
-        # Self-hosted backend URL (Ollama or vLLM)
-        - name: OLLAMA_URL
-          value: "http://ollama:11434"
-        # - name: VLLM_URL
-        #   value: "http://vllm:8000"
+        # Self-hosted backend URL (vLLM)
+        - name: VLLM_URL
+          value: "http://vllm:8000"
         # Provider API keys — all injected from the shared secret
         - name: OPENAI_API_KEY
           valueFrom:

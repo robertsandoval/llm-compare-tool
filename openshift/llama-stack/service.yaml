@@ -6,20 +6,29 @@ metadata:
 data:
   run.yaml: |
     version: '2'
-    image_name: llm-comparison-primary
+    image_name: llm-comparison-multi-provider
 
     providers:
       inference:
-      - provider_id: primary-inference
-        provider_type: remote::ollama
+      - provider_id: vllm
+        provider_type: remote::vllm
         config:
-          url: http://ollama:11434
+          url: ${env.VLLM_URL:http://vllm:8000}
 
-      # Switch to vLLM for GPU-accelerated nodes:
-      # - provider_id: primary-inference
-      #   provider_type: remote::vllm
-      #   config:
-      #     url: http://vllm:8000
+      - provider_id: openai
+        provider_type: remote::openai
+        config:
+          api_key: ${env.OPENAI_API_KEY}
+
+      - provider_id: anthropic
+        provider_type: remote::anthropic
+        config:
+          api_key: ${env.ANTHROPIC_API_KEY}
+
+      - provider_id: together
+        provider_type: remote::together
+        config:
+          api_key: ${env.TOGETHER_API_KEY}
 
       memory:
       - provider_id: faiss
@@ -36,10 +45,19 @@ data:
       db_path: /root/.llama/registry.db
 
     models:
-    - metadata: {}
-      model_id: meta-llama/Llama-3.1-8B-Instruct
-      provider_id: primary-inference
-      provider_model_id: null
+    - model_id: meta-llama/Llama-3.1-8B-Instruct
+      provider_id: vllm
+      provider_model_id: meta-llama/Llama-3.1-8B-Instruct
+      model_type: llm
+
+    - model_id: gpt-4o
+      provider_id: openai
+      provider_model_id: gpt-4o
+      model_type: llm
+
+    - model_id: claude-3-5-sonnet-20241022
+      provider_id: anthropic
+      provider_model_id: claude-3-5-sonnet-20241022
       model_type: llm
 ---
 apiVersion: v1

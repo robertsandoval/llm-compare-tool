@@ -76,10 +76,10 @@ modelRouter:
       timeout: 60
       enabled: false
 
-    - name: "ollama-llama70b"
-      modelId: "llama3.1:70b"
-      providerId: "ollama"
-      providerModelId: "llama3.1:70b"
+    - name: "vllm-llama70b"
+      modelId: "meta-llama/Llama-3.1-70B-Instruct"
+      providerId: "vllm"
+      providerModelId: "meta-llama/Llama-3.1-70B-Instruct"
       timeout: 120
       enabled: false
 
@@ -147,9 +147,9 @@ llamaStack:
       cpu: 2000m
       memory: 4Gi
   primaryModel: "meta-llama/Llama-3.1-8B-Instruct"
-  primaryModelId: "llama3.1:8b"
-  provider: ollama
-  backendUrl: "http://ollama:11434"
+  primaryModelId: "meta-llama/Llama-3.1-8B-Instruct"
+  provider: vllm
+  backendUrl: "http://vllm:8000"
   persistence:
     enabled: true
     size: 10Gi

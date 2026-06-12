@@ -1,14 +1,14 @@
 # Multi-provider llama-stack distribution
 #
 # Installs llama-stack plus the provider packages needed for all configured
-# backends (Ollama, OpenAI, Anthropic, Together).
+# backends (vLLM, OpenAI, Anthropic, Together).
 #
 # Build:
-#   docker build -t quay.io/your-org/llm-comparison-llama-stack:latest \
-#                -f llama-stack/Dockerfile llama-stack/
+#   podman build -t quay.io/your-org/llm-comparison-llama-stack:latest \
+#                -f llama-stack/Containerfile llama-stack/
 #
 # The run.yaml is mounted from a ConfigMap in OpenShift (or from the local
-# directory in docker-compose).  It is NOT baked into the image so you can
+# directory in podman-compose).  It is NOT baked into the image so you can
 # change the model registry without a rebuild.
 
 FROM python:3.12-slim

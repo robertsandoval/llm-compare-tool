@@ -27,8 +27,8 @@ llms:
     timeout: 60
     enabled: false
 
-  - name: "ollama-llama70b"
-    model_id: "llama3.1:70b"
+  - name: "vllm-llama70b"
+    model_id: "meta-llama/Llama-3.1-70B-Instruct"
     timeout: 120
     enabled: false
 
