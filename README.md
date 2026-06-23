@@ -1,4 +1,4 @@
-# LLM Comparison Tool
+# LLM Comparison Tool - working
 
 A platform for simultaneously comparing chat responses from multiple Large Language Models.
 Sends one request, gets back a side-by-side comparison from every configured LLM — all calls happen concurrently.
